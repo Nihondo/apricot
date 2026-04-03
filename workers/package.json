@@ -1,0 +1,21 @@
+{
+  "name": "apricot-irc-proxy",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241230.0",
+    "@types/encoding-japanese": "^2.2.1",
+    "typescript": "^5.7.0",
+    "vitest": "^4.1.2",
+    "wrangler": "^3.100.0"
+  },
+  "dependencies": {
+    "encoding-japanese": "^2.2.0"
+  }
+}

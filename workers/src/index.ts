@@ -1,0 +1,73 @@
+/**
+ * Cloudflare Worker entry point for apricot IRC Proxy.
+ *
+ * Routes:
+ *   GET  /proxy/:id/connect — Connect proxy to IRC server
+ *   GET  /proxy/:id/ws      — WebSocket endpoint for IRC clients
+ *   GET  /proxy/:id/status  — Get proxy status
+ *   GET  /proxy/:id/web/    — Web chat interface (channel list)
+ *   GET  /proxy/:id/web/:ch — Web chat interface (channel view)
+ *   POST /proxy/:id/web/:ch — Send message via web interface
+ *   POST /proxy/:id/api/join — Join a channel (Bearer auth)
+ *   POST /proxy/:id/api/post — Programmatic message posting (Bearer auth)
+ *   GET  /                   — Health check
+ */
+
+export { IrcProxyDO } from "./irc-proxy";
+
+// Env is declared globally via src/env.d.ts
+
+export default {
+  async fetch(request: Request, env: Env): Promise<Response> {
+    const url = new URL(request.url);
+    const path = url.pathname;
+
+    // Health check
+    if (path === "/" || path === "/health") {
+      return Response.json({
+        name: "apricot-irc-proxy",
+        version: "0.1.0",
+        status: "ok",
+      });
+    }
+
+    // Route: /proxy/:id/<action>
+    const match = path.match(/^\/proxy\/([^/]+)(\/.*)?$/);
+    if (!match) {
+      return new Response("Not found", { status: 404 });
+    }
+
+    const proxyId = match[1];
+    const subpath = match[2] || "/";
+
+    // API routes require Bearer token auth (except CORS preflight)
+    if (subpath.startsWith("/api/") && request.method !== "OPTIONS") {
+      const authHeader = request.headers.get("Authorization");
+      if (!env.API_KEY || authHeader !== `Bearer ${env.API_KEY}`) {
+        return Response.json({ error: "unauthorized" }, { status: 401 });
+      }
+    }
+
+    // Get or create Durable Object for this proxy session
+    const id = env.IRC_PROXY.idFromName(proxyId);
+    const stub = env.IRC_PROXY.get(id);
+
+    // Forward request to the Durable Object.
+    // Pass the original proxy prefix so the DO can generate correct URLs
+    // for web interface links, form actions, and redirects.
+    const doUrl = new URL(request.url);
+    doUrl.pathname = subpath;
+
+    const headers = new Headers(request.headers);
+    headers.set("X-Proxy-Prefix", `/proxy/${proxyId}`);
+
+    return stub.fetch(
+      new Request(doUrl.toString(), {
+        method: request.method,
+        headers,
+        body: request.method === "GET" || request.method === "HEAD" ? null : request.body,
+        redirect: "manual",
+      })
+    );
+  },
+} satisfies ExportedHandler<Env>;

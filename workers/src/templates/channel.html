@@ -1,0 +1,36 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, user-scalable=no">
+<title>IRC: {{CHANNEL}}</title>
+<style>{{CSS}}</style>
+<script>
+window.onload = function() {
+  if (sessionStorage.getItem('justPosted') === 'true') {
+    sessionStorage.removeItem('justPosted');
+    location.replace(location.pathname);
+  }
+};
+window.addEventListener('load', function () {
+  setInterval(function () {
+    var el = document.querySelector('.message-input');
+    if (el && el.value.trim() === '' && document.activeElement !== el) {
+      location.reload();
+    }
+  }, 30000);
+});
+</script>
+</head>
+<body>
+<div style="margin:5px;">
+  <div class="topic">Topic: {{TOPIC}}</div>
+  <form action="{{ACTION_URL}}" method="POST">
+    <input type="text" name="message" size="10" class="message-input" autocomplete="off"><input type="submit" value="OK" class="submit-button" onclick="sessionStorage.setItem('justPosted','true');">
+    <div style="position:fixed; bottom:10px; left:50%;">
+      <button type="button" class="floating" onclick="location.reload();">Reload</button>
+    </div>
+  </form>
+  <hr>
+  {{MESSAGES}}
+</div>
+</body></html>

@@ -1,0 +1,36 @@
+name = "apricot-irc-proxy"
+main = "src/index.ts"
+compatibility_date = "2024-12-30"
+
+[vars]
+IRC_HOST = "irc.friend-chat.jp"
+IRC_PORT = "6660-6669"
+IRC_NICK = "apricot"
+IRC_USER = "apricot"
+IRC_REALNAME = "apricot IRC Proxy"
+IRC_TLS = "false"
+IRC_AUTO_CONNECT_ON_STARTUP = "true"
+IRC_AUTO_RECONNECT_ON_DISCONNECT = "true"
+IRC_AUTOJOIN = "#dameTunes"
+KEEPALIVE_INTERVAL = "60"
+TIMEZONE_OFFSET = "9"
+IRC_ENCODING = "iso-2022-jp"
+
+[[rules]]
+type = "Text"
+globs = ["**/*.html", "**/*.css"]
+fallthrough = false
+
+[durable_objects]
+bindings = [
+  { name = "IRC_PROXY", class_name = "IrcProxyDO" }
+]
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["IrcProxyDO"]
+
+[observability]
+[observability.logs]
+enabled = true
+invocation_logs = true
