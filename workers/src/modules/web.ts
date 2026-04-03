@@ -28,9 +28,15 @@ export interface StoredMessage {
   text: string;
 }
 
+/**
+ * JSON-serializable snapshot of per-channel web logs keyed by lowercase channel.
+ */
+export type PersistedWebLogs = Record<string, StoredMessage[]>;
+
 const MAX_LINES = 200;
 
 type MessageBufferStore = Map<string, StoredMessage[]>;
+type PersistLogsCallback = (logs: PersistedWebLogs) => Promise<void>;
 
 /** Minimal interface for channel membership lookup (avoids circular import) */
 interface ChannelMembership {
@@ -148,7 +154,11 @@ export function buildChannelListPage(
  * The channelStates map is used to determine which channels a quitting user
  * was in (must run before channelTrackModule to see the membership).
  */
-export function createWebModule(channelStates: Map<string, ChannelMembership>, timezoneOffset = 0) {
+export function createWebModule(
+  channelStates: Map<string, ChannelMembership>,
+  timezoneOffset = 0,
+  persistLogs?: PersistLogsCallback
+) {
   const store: MessageBufferStore = new Map();
 
   function getBuffer(channel: string): StoredMessage[] {
@@ -169,59 +179,79 @@ export function createWebModule(channelStates: Map<string, ChannelMembership>, t
     }
   }
 
+  async function persistSnapshot(): Promise<void> {
+    if (!persistLogs) return;
+    await persistLogs(snapshotLogs());
+  }
+
+  async function appendMessage(channel: string, msg: StoredMessage): Promise<void> {
+    pushMessage(channel, msg);
+    await persistSnapshot();
+  }
+
+  async function appendMessages(entries: Array<[string, StoredMessage]>): Promise<void> {
+    if (entries.length === 0) return;
+    for (const [channel, msg] of entries) {
+      pushMessage(channel, msg);
+    }
+    await persistSnapshot();
+  }
+
   const module = defineModule("web", (m) => {
-    m.on("ss_privmsg", (_ctx, msg) => {
+    m.on("ss_privmsg", async (_ctx, msg) => {
       const nick = msg.prefix ? extractNick(msg.prefix) : "?";
       const target = msg.params[0];
       const text = msg.params[1] || "";
       const channel = isChannel(target) ? target : nick; // DM keyed by sender nick
-      pushMessage(channel, { time: Date.now(), type: "privmsg", nick, text });
+      await appendMessage(channel, { time: Date.now(), type: "privmsg", nick, text });
       return msg;
     });
 
-    m.on("ss_notice", (_ctx, msg) => {
+    m.on("ss_notice", async (_ctx, msg) => {
       const nick = msg.prefix ? extractNick(msg.prefix) : "?";
       const target = msg.params[0];
       const text = msg.params[1] || "";
       const channel = isChannel(target) ? target : nick;
-      pushMessage(channel, { time: Date.now(), type: "notice", nick, text });
+      await appendMessage(channel, { time: Date.now(), type: "notice", nick, text });
       return msg;
     });
 
-    m.on("ss_join", (_ctx, msg) => {
+    m.on("ss_join", async (_ctx, msg) => {
       const nick = msg.prefix ? extractNick(msg.prefix) : "?";
       const channel = msg.params[0];
-      pushMessage(channel, { time: Date.now(), type: "join", nick, text: channel });
+      await appendMessage(channel, { time: Date.now(), type: "join", nick, text: channel });
       return msg;
     });
 
-    m.on("ss_part", (_ctx, msg) => {
+    m.on("ss_part", async (_ctx, msg) => {
       const nick = msg.prefix ? extractNick(msg.prefix) : "?";
       const channel = msg.params[0];
       const reason = msg.params[1] || "";
-      pushMessage(channel, { time: Date.now(), type: "part", nick, text: reason || channel });
+      await appendMessage(channel, { time: Date.now(), type: "part", nick, text: reason || channel });
       return msg;
     });
 
-    m.on("ss_quit", (_ctx, msg) => {
+    m.on("ss_quit", async (_ctx, msg) => {
       const nick = msg.prefix ? extractNick(msg.prefix) : "?";
       const reason = msg.params[0] || "";
+      const entries: Array<[string, StoredMessage]> = [];
       // Log quit only to channels the user was actually in.
       // This runs BEFORE channelTrackModule, so membership is still intact.
       for (const [, state] of channelStates) {
         if (state.members.has(nick)) {
-          pushMessage(state.name, { time: Date.now(), type: "quit", nick, text: reason });
+          entries.push([state.name, { time: Date.now(), type: "quit", nick, text: reason }]);
         }
       }
+      await appendMessages(entries);
       return msg;
     });
 
-    m.on("ss_kick", (_ctx, msg) => {
+    m.on("ss_kick", async (_ctx, msg) => {
       const kicker = msg.prefix ? extractNick(msg.prefix) : "?";
       const channel = msg.params[0];
       const kicked = msg.params[1];
       const reason = msg.params[2] || "";
-      pushMessage(channel, {
+      await appendMessage(channel, {
         time: Date.now(),
         type: "kick",
         nick: kicker,
@@ -230,31 +260,33 @@ export function createWebModule(channelStates: Map<string, ChannelMembership>, t
       return msg;
     });
 
-    m.on("ss_nick", (_ctx, msg) => {
+    m.on("ss_nick", async (_ctx, msg) => {
       const oldNick = msg.prefix ? extractNick(msg.prefix) : "?";
       const newNick = msg.params[0];
+      const entries: Array<[string, StoredMessage]> = [];
       for (const [, state] of channelStates) {
         if (state.members.has(oldNick)) {
-          pushMessage(state.name, { time: Date.now(), type: "nick", nick: oldNick, text: newNick });
+          entries.push([state.name, { time: Date.now(), type: "nick", nick: oldNick, text: newNick }]);
         }
       }
+      await appendMessages(entries);
       return msg;
     });
 
-    m.on("ss_topic", (_ctx, msg) => {
+    m.on("ss_topic", async (_ctx, msg) => {
       const nick = msg.prefix ? extractNick(msg.prefix) : "?";
       const channel = msg.params[0];
       const topic = msg.params[1] || "";
-      pushMessage(channel, { time: Date.now(), type: "topic", nick, text: topic });
+      await appendMessage(channel, { time: Date.now(), type: "topic", nick, text: topic });
       return msg;
     });
 
-    m.on("ss_mode", (_ctx, msg) => {
+    m.on("ss_mode", async (_ctx, msg) => {
       const nick = msg.prefix ? extractNick(msg.prefix) : "?";
       const target = msg.params[0];
       if (isChannel(target)) {
         const modeStr = msg.params.slice(1).join(" ");
-        pushMessage(target, { time: Date.now(), type: "mode", nick, text: modeStr });
+        await appendMessage(target, { time: Date.now(), type: "mode", nick, text: modeStr });
       }
       return msg;
     });
@@ -289,8 +321,11 @@ export function createWebModule(channelStates: Map<string, ChannelMembership>, t
       .replace("{{MESSAGES}}", lines);
   }
 
-  function recordSelfMessage(channel: string, nick: string, text: string): void {
-    pushMessage(channel, { time: Date.now(), type: "self", nick, text });
+  /**
+   * Adds a locally generated message and persists the latest snapshot.
+   */
+  async function recordSelfMessage(channel: string, nick: string, text: string): Promise<void> {
+    await appendMessage(channel, { time: Date.now(), type: "self", nick, text });
   }
 
   function getChannelTopic(channel: string): string {
@@ -301,5 +336,30 @@ export function createWebModule(channelStates: Map<string, ChannelMembership>, t
     return "";
   }
 
-  return { module, buildChannelPage, recordSelfMessage, getChannelTopic };
+  /**
+   * Returns a JSON-serializable snapshot of the current web log buffers.
+   */
+  function snapshotLogs(): PersistedWebLogs {
+    return Object.fromEntries(
+      Array.from(store.entries()).map(([channel, messages]) => [
+        channel,
+        messages.map((msg) => ({ ...msg })),
+      ])
+    );
+  }
+
+  /**
+   * Restores web log buffers from a previously persisted snapshot.
+   */
+  function hydrateLogs(snapshot?: PersistedWebLogs | null): void {
+    store.clear();
+    if (!snapshot) return;
+
+    for (const [channel, messages] of Object.entries(snapshot)) {
+      const restored = messages.slice(-MAX_LINES).map((msg) => ({ ...msg }));
+      store.set(channel.toLowerCase(), restored);
+    }
+  }
+
+  return { module, buildChannelPage, recordSelfMessage, getChannelTopic, snapshotLogs, hydrateLogs };
 }

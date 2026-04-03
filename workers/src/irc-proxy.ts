@@ -10,11 +10,12 @@ import { ModuleRegistry } from "./module-system";
 import { pingModule } from "./modules/ping";
 import { createChannelTrackModule, type ChannelState } from "./modules/channel-track";
 import { createClientSyncModule } from "./modules/client-sync";
-import { createWebModule, buildChannelListPage } from "./modules/web";
+import { createWebModule, buildChannelListPage, type PersistedWebLogs } from "./modules/web";
 import { extractUrlMetadata } from "./modules/url-metadata";
 import { buildProxyConfigFromEnv, type ProxyConfig } from "./proxy-config";
 
 const reconnectDelayMs = 5_000;
+const webLogsStorageKey = "web:logs:v1";
 
 export class IrcProxyDO implements DurableObject {
   private state: DurableObjectState;
@@ -48,7 +49,13 @@ export class IrcProxyDO implements DurableObject {
     }
 
     const timezoneOffset = parseFloat(env.TIMEZONE_OFFSET || "0");
-    this.web = createWebModule(this.channelStates, timezoneOffset);
+    this.web = createWebModule(
+      this.channelStates,
+      timezoneOffset,
+      async (logs) => {
+        await this.persistWebLogs(logs);
+      }
+    );
 
     // Module registration order matters for QUIT/NICK:
     //   web logs messages first (sees full membership),
@@ -59,6 +66,7 @@ export class IrcProxyDO implements DurableObject {
     this.modules.register(createClientSyncModule(this.channelStates));
 
     void this.state.blockConcurrencyWhile(async () => {
+      await this.loadPersistedWebLogs();
       await this.handleStartupAutoConnect();
     });
   }
@@ -170,7 +178,7 @@ export class IrcProxyDO implements DurableObject {
             params: [channel, text],
           });
 
-          this.web.recordSelfMessage(channel, this.nick, text);
+          await this.web.recordSelfMessage(channel, this.nick, text);
 
           this.broadcast({
             prefix: `${this.nick}!proxy@apricot`,
@@ -360,7 +368,7 @@ export class IrcProxyDO implements DurableObject {
       params: [channel, text],
     });
 
-    this.web.recordSelfMessage(channel, this.nick, text);
+    await this.web.recordSelfMessage(channel, this.nick, text);
 
     this.broadcast({
       prefix: `${this.nick}!proxy@apricot`,
@@ -455,6 +463,7 @@ export class IrcProxyDO implements DurableObject {
           const ctx = this.makeContext(0);
           await this.modules.dispatchLifecycle("onServerClose", ctx);
           this.serverConn = null;
+          await this.persistCurrentWebLogs();
 
           // Stop keepalive alarm
           await this.state.storage.deleteAlarm();
@@ -608,6 +617,23 @@ export class IrcProxyDO implements DurableObject {
 
   private async scheduleReconnectAlarm(): Promise<void> {
     await this.state.storage.setAlarm(Date.now() + reconnectDelayMs);
+  }
+
+  private async loadPersistedWebLogs(): Promise<void> {
+    const logs = await this.state.storage.get<PersistedWebLogs>(webLogsStorageKey);
+    this.web.hydrateLogs(logs ?? null);
+  }
+
+  private async persistCurrentWebLogs(): Promise<void> {
+    await this.persistWebLogs(this.web.snapshotLogs());
+  }
+
+  private async persistWebLogs(logs: PersistedWebLogs): Promise<void> {
+    try {
+      await this.state.storage.put(webLogsStorageKey, logs);
+    } catch (error) {
+      console.error("Failed to persist web logs", error);
+    }
   }
 }
 
