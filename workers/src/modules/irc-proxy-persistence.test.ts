@@ -368,6 +368,44 @@ describe("IrcProxyDO web log persistence", () => {
     });
   });
 
+  it("accepts nick changes when the server reply arrives before send resolves", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const send = vi.fn(async () => {
+      await (proxy as any).handleServerMessage({
+        prefix: "apricot!user@host",
+        command: "NICK",
+        params: ["apricot_alt"],
+      });
+    });
+    (proxy as any).serverConn = {
+      connected: true,
+      send,
+    };
+    (proxy as any).nick = "apricot";
+
+    const response = await proxy.fetch(new Request("https://example.com/api/nick", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: JSON.stringify({ nick: "apricot_alt" }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, nick: "apricot_alt" });
+    expect(send).toHaveBeenCalledWith({
+      command: "NICK",
+      params: ["apricot_alt"],
+    });
+  });
+
   it("rejects nick-change API requests while disconnected", async () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(

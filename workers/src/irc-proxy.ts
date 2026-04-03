@@ -516,21 +516,33 @@ export class IrcProxyDO implements DurableObject {
       );
     }
 
-    await this.serverConn.send({
-      command: "NICK",
-      params: [nick],
+    let pendingNickChange: NonNullable<IrcProxyDO["pendingNickChange"]>;
+    const pendingNickChangePromise = new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.pendingNickChange = null;
+        reject(new Error("timeout waiting for server response"));
+      }, 5000);
+      pendingNickChange = { resolve, reject, timer };
+      this.pendingNickChange = pendingNickChange;
     });
 
-    // Wait for server confirmation (success or error)
+    try {
+      await this.serverConn.send({
+        command: "NICK",
+        params: [nick],
+      });
+    } catch (err) {
+      if (this.pendingNickChange === pendingNickChange!) {
+        clearTimeout(pendingNickChange!.timer);
+        this.pendingNickChange = null;
+      }
+      const msg = err instanceof Error ? err.message : String(err);
+      return Response.json({ error: msg }, { status: 502, headers: corsHeaders() });
+    }
+
     let confirmedNick: string;
     try {
-      confirmedNick = await new Promise<string>((resolve, reject) => {
-        const timer = setTimeout(() => {
-          this.pendingNickChange = null;
-          reject(new Error("timeout waiting for server response"));
-        }, 5000);
-        this.pendingNickChange = { resolve, reject, timer };
-      });
+      confirmedNick = await pendingNickChangePromise;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       return Response.json({ error: msg }, { status: 503, headers: corsHeaders() });
