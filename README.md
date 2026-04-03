@@ -333,7 +333,7 @@ npx wrangler secret put CLIENT_PASSWORD      # 必要な場合のみ
 ### デプロイ後の URL
 
 ```
-https://apricot-irc-proxy.<your-subdomain>.workers.dev/proxy/myproxy/web/
+https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 ```
 
 ---
