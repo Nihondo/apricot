@@ -300,7 +300,7 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 | `IRC_AUTO_CONNECT_ON_STARTUP` | ─ | `true` | Durable Object インスタンス起動時に IRC へ接続開始 |
 | `IRC_AUTO_RECONNECT_ON_DISCONNECT` | ─ | `true` | IRC 切断時に 5 秒後の自動再接続を有効化 |
 | `IRC_AUTOJOIN` | ─ | ─ | 自動参加チャンネル（カンマ区切り、例: `#general,#test`） |
-| `KEEPALIVE_INTERVAL` | ─ | `60` | DO keepalive 間隔（秒）。IRC 接続中に DO 退避を防止 |
+| `KEEPALIVE_INTERVAL` | ─ | `60` | DO keepalive 間隔（秒）。IRC 接続中に Alarm を再設定して DO の退避を防ぎやすくする |
 | `IRC_ENCODING` | ─ | `utf-8` | IRC サーバーの文字コード（例: `iso-2022-jp`、`euc-jp`、`shift_jis`） |
 | `TIMEZONE_OFFSET` | ─ | `9` | Web UI の時刻表示オフセット（時間単位、例: JST は `9`） |
 | `WEB_LOG_MAX_LINES` | ─ | `200` | チャンネルごとのログ保持件数 |
@@ -411,7 +411,31 @@ stateDiagram-v2
     processing --> destroyed : destroy / done
 ```
 
-### 前提技術
+
+### 常駐しているように見せる仕組み
+
+このプロジェクトでは、IRC 接続確立後に Durable Object が `storage.setAlarm()` で次回の keepalive を予約し、`alarm()` ハンドラが起動するたびに再び次回アラームを登録します。
+
+```text
+IRC 接続完了
+  ↓
+KEEPALIVE_INTERVAL 秒後に Alarm を予約
+  ↓
+alarm() 発火
+  ↓
+IRC 接続中なら次回 Alarm を再予約
+  ↓
+この繰り返しで DO に定期イベントを入れ続ける
+```
+
+ポイントは、Durable Object が「完全に常駐している」わけではなく、アイドル退避される前に定期的なイベントを入れることで、同じインスタンスと in-memory 状態を維持しやすくしている点です。`workers/src/irc-proxy.ts` では、IRC 接続中は keepalive 用 Alarm を回し続け、切断時には Alarm を停止します。
+
+この仕組みにより、IRC 側からしばらく発言が流れなくても Durable Object が休眠しにくくなり、結果として IRC への TCP 接続も維持しやすくなります。一方で、Cloudflare のデプロイ、ランタイム更新、配置変更などでは Durable Object が再生成される可能性があるため、永続稼働が保証されるわけではありません。そのため本実装は、再接続やログ復元を前提に設計しています。
+
+`KEEPALIVE_INTERVAL` は短すぎると invocation 数が増え、長すぎると次の Alarm より先に退避されるリスクがあります。運用時は接続安定性とコストのバランスを見ながら調整してください。
+
+
+## 前提技術
 
 - Perl 製 IRC プロキシ「plum」を **Cloudflare Workers + Durable Objects** で実装した TypeScript 版
 - [Node.js](https://nodejs.org/) 18 以上
