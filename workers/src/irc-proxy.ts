@@ -47,12 +47,12 @@ export class IrcProxyDO implements DurableObject {
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
     this.config = buildProxyConfigFromEnv(env);
-    this.keepaliveMs = (parseInt(env.KEEPALIVE_INTERVAL || "50", 10)) * 1000;
+    this.keepaliveMs = (parseInt(env.KEEPALIVE_INTERVAL || "60", 10)) * 1000;
     if (this.config) {
       this.nick = this.config.server.nick;
     }
 
-    const timezoneOffset = parseFloat(env.TIMEZONE_OFFSET || "0");
+    const timezoneOffset = parseFloat(env.TIMEZONE_OFFSET || "9");
     this.web = createWebModule(
       this.channelStates,
       timezoneOffset,

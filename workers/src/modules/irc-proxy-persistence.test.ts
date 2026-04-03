@@ -73,7 +73,7 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
     IRC_REALNAME: "apricot IRC Proxy",
     IRC_TLS: "false",
     IRC_AUTOJOIN: "",
-    KEEPALIVE_INTERVAL: "50",
+    KEEPALIVE_INTERVAL: "60",
     ...overrides,
   };
 }

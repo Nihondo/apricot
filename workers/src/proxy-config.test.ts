@@ -46,7 +46,7 @@ describe("buildProxyConfigFromEnv", () => {
       IRC_AUTO_CONNECT_ON_STARTUP: "true",
       IRC_AUTO_RECONNECT_ON_DISCONNECT: "1",
       IRC_AUTOJOIN: "#general,#test",
-      KEEPALIVE_INTERVAL: "50",
+      KEEPALIVE_INTERVAL: "60",
       TIMEZONE_OFFSET: "9",
       IRC_ENCODING: "utf-8",
     } satisfies Env;
@@ -81,7 +81,7 @@ describe("buildProxyConfigFromEnv", () => {
       IRC_REALNAME: "apricot IRC Proxy",
       IRC_TLS: "false",
       IRC_AUTOJOIN: "",
-      KEEPALIVE_INTERVAL: "50",
+      KEEPALIVE_INTERVAL: "60",
     } as Env;
 
     expect(buildProxyConfigFromEnv(env)).toBeNull();

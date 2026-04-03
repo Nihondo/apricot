@@ -118,12 +118,12 @@ npm test
 | `IRC_TLS` | ─ | `false` | TLS 使用（`true` / `false`） |
 | `IRC_PASSWORD` | ─ | ─ | IRC サーバーパスワード（secret 推奨） |
 | `CLIENT_PASSWORD` | ─ | ─ | WebSocket クライアント接続と Web UI ログインの共通パスワード（secret 推奨） |
-| `IRC_AUTO_CONNECT_ON_STARTUP` | ─ | `false` | Durable Object インスタンス起動時に IRC へ接続開始 |
-| `IRC_AUTO_RECONNECT_ON_DISCONNECT` | ─ | `false` | IRC 切断時に 5 秒後の自動再接続を有効化 |
+| `IRC_AUTO_CONNECT_ON_STARTUP` | ─ | `true` | Durable Object インスタンス起動時に IRC へ接続開始 |
+| `IRC_AUTO_RECONNECT_ON_DISCONNECT` | ─ | `true` | IRC 切断時に 5 秒後の自動再接続を有効化 |
 | `IRC_AUTOJOIN` | ─ | ─ | 自動参加チャンネル（カンマ区切り、例: `#general,#test`） |
-| `KEEPALIVE_INTERVAL` | ─ | `50` | DO keepalive 間隔（秒）。IRC 接続中に DO 退避を防止 |
+| `KEEPALIVE_INTERVAL` | ─ | `60` | DO keepalive 間隔（秒）。IRC 接続中に DO 退避を防止 |
 | `IRC_ENCODING` | ─ | `utf-8` | IRC サーバーの文字コード（例: `iso-2022-jp`、`euc-jp`、`shift_jis`） |
-| `TIMEZONE_OFFSET` | ─ | `0` | Web UI の時刻表示オフセット（時間単位、例: JST は `9`） |
+| `TIMEZONE_OFFSET` | ─ | `9` | Web UI の時刻表示オフセット（時間単位、例: JST は `9`） |
 | `API_KEY` | ✅ | ─ | 外部 API 認証キー（secret 必須） |
 
 > **補足**: `IRC_AUTO_CONNECT_ON_STARTUP` の「起動時」は、Cloudflare Workers 全体の起動ではなく、各プロキシ ID の Durable Object インスタンスが最初のリクエストや WebSocket 接続で起動したタイミングを指します。
