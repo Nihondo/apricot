@@ -11,10 +11,10 @@ IRC_REALNAME = "apricot IRC Proxy"
 IRC_TLS = "false"
 IRC_AUTO_CONNECT_ON_STARTUP = "true"
 IRC_AUTO_RECONNECT_ON_DISCONNECT = "true"
-#IRC_AUTOJOIN = "#dameTunes"
+IRC_AUTOJOIN = "#dameTunes"
 KEEPALIVE_INTERVAL = "60"
 TIMEZONE_OFFSET = "9"
-#IRC_ENCODING = "iso-2022-jp"
+IRC_ENCODING = "iso-2022-jp"
 
 [[rules]]
 type = "Text"
