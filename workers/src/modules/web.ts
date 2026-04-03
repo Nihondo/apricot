@@ -33,7 +33,7 @@ export interface StoredMessage {
  */
 export type PersistedWebLogs = Record<string, StoredMessage[]>;
 
-const MAX_LINES = 200;
+const DEFAULT_maxLines = 200;
 
 type MessageBufferStore = Map<string, StoredMessage[]>;
 type PersistLogsCallback = (logs: PersistedWebLogs) => Promise<void>;
@@ -164,7 +164,8 @@ export function buildChannelListPage(
 export function createWebModule(
   channelStates: Map<string, ChannelMembership>,
   timezoneOffset = 0,
-  persistLogs?: PersistLogsCallback
+  persistLogs?: PersistLogsCallback,
+  maxLines = DEFAULT_maxLines
 ) {
   const store: MessageBufferStore = new Map();
 
@@ -181,8 +182,8 @@ export function createWebModule(
   function pushMessage(channel: string, msg: StoredMessage): void {
     const buf = getBuffer(channel);
     buf.push(msg);
-    if (buf.length > MAX_LINES) {
-      buf.splice(0, buf.length - MAX_LINES);
+    if (buf.length > maxLines) {
+      buf.splice(0, buf.length - maxLines);
     }
   }
 
@@ -370,7 +371,7 @@ export function createWebModule(
     if (!snapshot) return;
 
     for (const [channel, messages] of Object.entries(snapshot)) {
-      const restored = messages.slice(-MAX_LINES).map((msg) => ({ ...msg }));
+      const restored = messages.slice(-maxLines).map((msg) => ({ ...msg }));
       store.set(channel.toLowerCase(), restored);
     }
   }

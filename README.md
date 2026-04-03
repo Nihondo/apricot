@@ -104,7 +104,7 @@ http://localhost:8787/proxy/myproxy/web/
 
 **主な機能**:
 
-- メッセージは最新 200 件をインメモリに保持（新しい順に表示）
+- メッセージは最新 `WEB_LOG_MAX_LINES` 件をインメモリに保持（デフォルト 200 件、新しい順に表示）
 - Durable Object storage にもログを保存し、DO 再起動後も再接続で表示を復元
 - 30 秒ごとに自動リフレッシュ（入力中は停止）
 - ダーク／ライトモード自動切替（`prefers-color-scheme` 対応）
@@ -294,6 +294,7 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 | `KEEPALIVE_INTERVAL` | ─ | `60` | DO keepalive 間隔（秒）。IRC 接続中に DO 退避を防止 |
 | `IRC_ENCODING` | ─ | `utf-8` | IRC サーバーの文字コード（例: `iso-2022-jp`、`euc-jp`、`shift_jis`） |
 | `TIMEZONE_OFFSET` | ─ | `9` | Web UI の時刻表示オフセット（時間単位、例: JST は `9`） |
+| `WEB_LOG_MAX_LINES` | ─ | `200` | チャンネルごとのログ保持件数 |
 | `API_KEY` | ✅ | ─ | 外部 API 認証キー（secret 必須） |
 
 > **補足**: `IRC_AUTO_CONNECT_ON_STARTUP` の「起動時」は、Cloudflare Workers 全体の起動ではなく、各プロキシ ID の Durable Object インスタンスが最初のリクエストや WebSocket 接続で起動したタイミングを指します。

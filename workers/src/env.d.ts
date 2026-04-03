@@ -20,6 +20,8 @@ interface Env {
   KEEPALIVE_INTERVAL: string;
   // Timezone offset for web UI (hours, e.g. 9 for JST)
   TIMEZONE_OFFSET?: string;
+  // Max lines to keep in web log buffer per channel
+  WEB_LOG_MAX_LINES?: string;
   // IRC server character encoding (e.g. "iso-2022-jp", "utf-8")
   IRC_ENCODING?: string;
 }

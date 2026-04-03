@@ -53,12 +53,14 @@ export class IrcProxyDO implements DurableObject {
     }
 
     const timezoneOffset = parseFloat(env.TIMEZONE_OFFSET || "9");
+    const webLogMaxLines = parseInt(env.WEB_LOG_MAX_LINES || "200", 10);
     this.web = createWebModule(
       this.channelStates,
       timezoneOffset,
       async (logs) => {
         await this.persistWebLogs(logs);
-      }
+      },
+      webLogMaxLines
     );
 
     // Module registration order matters for QUIT/NICK:
