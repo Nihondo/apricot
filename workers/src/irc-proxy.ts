@@ -94,8 +94,8 @@ export class IrcProxyDO implements DurableObject {
       return this.redirectToWebLogin(webBase);
     }
 
-    // GET /connect — connect to IRC server
-    if (url.pathname === "/connect") {
+    // POST /api/connect — connect to IRC server
+    if (request.method === "POST" && url.pathname === "/api/connect") {
       if (!this.config) {
         return new Response("IRC_HOST not configured", { status: 400 });
       }
@@ -128,8 +128,8 @@ export class IrcProxyDO implements DurableObject {
       return new Response(null, { status: 101, webSocket: client });
     }
 
-    // GET /status — proxy status
-    if (url.pathname === "/status") {
+    // GET /api/status — proxy status
+    if (request.method === "GET" && url.pathname === "/api/status") {
       return Response.json({
         connected: this.serverConn?.connected ?? false,
         nick: this.nick,
@@ -167,6 +167,12 @@ export class IrcProxyDO implements DurableObject {
     // POST /api/disconnect — disconnect from IRC server
     if (request.method === "POST" && url.pathname === "/api/disconnect") {
       return this.handleApiDisconnect();
+    }
+
+    // GET /api/logs/:channel — retrieve buffered messages for a channel
+    const logsMatch = url.pathname.match(/^\/api\/logs\/(.+)$/);
+    if (request.method === "GET" && logsMatch) {
+      return this.handleApiLogs(decodeURIComponent(logsMatch[1]));
     }
 
     // --- Web interface routes ---
@@ -468,6 +474,17 @@ export class IrcProxyDO implements DurableObject {
     });
 
     return Response.json({ ok: true, nick }, { headers: corsHeaders() });
+  }
+
+  private handleApiLogs(channel: string): Response {
+    const logs = this.web.getChannelLogs(channel);
+    if (logs === null) {
+      return Response.json(
+        { error: "channel not found" },
+        { status: 404, headers: corsHeaders() }
+      );
+    }
+    return Response.json({ channel, messages: logs }, { headers: corsHeaders() });
   }
 
   private async handleApiDisconnect(): Promise<Response> {

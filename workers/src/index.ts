@@ -2,9 +2,9 @@
  * Cloudflare Worker entry point for apricot IRC Proxy.
  *
  * Routes:
- *   GET  /proxy/:id/connect — Connect proxy to IRC server (Bearer auth)
+ *   POST /proxy/:id/api/connect — Connect proxy to IRC server (Bearer auth)
  *   GET  /proxy/:id/ws      — WebSocket endpoint for IRC clients
- *   GET  /proxy/:id/status  — Get proxy status
+ *   GET  /proxy/:id/api/status — Get proxy status
  *   GET  /proxy/:id/web/    — Web chat interface (channel list)
  *   GET  /proxy/:id/web/:ch — Web chat interface (channel view)
  *   GET  /proxy/:id/web/login — Web UI login form
@@ -15,6 +15,7 @@
  *   POST /proxy/:id/api/post — Programmatic message posting (Bearer auth)
  *   POST /proxy/:id/api/nick — Change IRC nick (Bearer auth)
  *   POST /proxy/:id/api/disconnect — Disconnect from IRC server (Bearer auth)
+ *   GET  /proxy/:id/api/logs/:channel — Retrieve buffered messages for a channel
  *   GET  /                   — Health check
  */
 
@@ -45,9 +46,11 @@ export default {
     const proxyId = match[1];
     const subpath = match[2] || "/";
 
+    const isReadOnlyApiRoute =
+      request.method === "GET" && (/^\/api\/logs\//.test(subpath) || subpath === "/api/status");
+
     const requiresBearerAuth =
-      (subpath.startsWith("/api/") && request.method !== "OPTIONS")
-      || subpath === "/connect";
+      !isReadOnlyApiRoute && subpath.startsWith("/api/") && request.method !== "OPTIONS";
 
     // Mutating management routes require Bearer token auth.
     if (requiresBearerAuth) {

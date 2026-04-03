@@ -30,11 +30,11 @@ function makeEnv() {
 }
 
 describe("worker auth", () => {
-  it("requires bearer auth for /connect", async () => {
+  it("requires bearer auth for /api/connect", async () => {
     const { env, get } = makeEnv();
 
     const response = await worker.fetch(
-      new Request("https://example.com/proxy/main/connect"),
+      new Request("https://example.com/proxy/main/api/connect", { method: "POST" }),
       env
     );
 
@@ -43,11 +43,12 @@ describe("worker auth", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
-  it("forwards /connect when bearer auth is present", async () => {
+  it("forwards /api/connect when bearer auth is present", async () => {
     const { env, fetch, get } = makeEnv();
 
     const response = await worker.fetch(
-      new Request("https://example.com/proxy/main/connect", {
+      new Request("https://example.com/proxy/main/api/connect", {
+        method: "POST",
         headers: { Authorization: "Bearer secret-token" },
       }),
       env

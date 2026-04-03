@@ -375,5 +375,14 @@ export function createWebModule(
     }
   }
 
-  return { module, buildChannelPage, recordSelfMessage, getChannelTopic, snapshotLogs, hydrateLogs };
+  /**
+   * Returns the stored messages for a single channel (lowercase key match).
+   * Returns null if no buffer exists for that channel.
+   */
+  function getChannelLogs(channel: string): StoredMessage[] | null {
+    const buf = store.get(channel.toLowerCase());
+    return buf ? [...buf] : null;
+  }
+
+  return { module, buildChannelPage, recordSelfMessage, getChannelTopic, snapshotLogs, hydrateLogs, getChannelLogs };
 }

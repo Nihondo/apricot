@@ -1,6 +1,6 @@
 # apricot IRC Proxy
 
-IRC サーバーへの永続接続を維持し、**ブラウザ・IRC クライアント・外部スクリプト**の 3 経路からチャットに参加できる IRC プロキシです。
+IRC サーバーへの永続接続を維持し、**ブラウザ・IRC クライアント・REST API**の 3 経路からチャットに参加できる IRC プロキシです。
 Cloudflare Workers + Durable Objects で動作します。
 
 長らくお世話になっていた Perl 製 IRC プロキシ「plum」を Cloudflare Workers で動かしてくれ、と Claude Code に頼んだらこれになりました。
@@ -63,14 +63,14 @@ npm run dev
 ### 4. IRC サーバーへ接続する
 
 ```bash
-curl -X GET http://localhost:8787/proxy/myproxy/connect \
+curl -X POST http://localhost:8787/proxy/myproxy/api/connect \
   -H "Authorization: Bearer your-api-key"
 ```
 
 接続は非同期で開始されます。状態を確認するには:
 
 ```bash
-curl http://localhost:8787/proxy/myproxy/status
+curl http://localhost:8787/proxy/myproxy/api/status
 ```
 
 レスポンス例:
@@ -209,6 +209,37 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/disconnect \
 
 > **補足**: API での手動切断は `IRC_AUTO_RECONNECT_ON_DISCONNECT=true` でも自動再接続を行いません。
 
+#### チャンネルのログを取得する
+
+```bash
+curl http://localhost:8787/proxy/myproxy/api/logs/%23general
+```
+
+チャンネル名の `#` は `%23` にエンコードしてください。
+
+レスポンス例:
+
+```json
+{
+  "channel": "#general",
+  "messages": [
+    {"time": 1712160000000, "type": "privmsg", "nick": "alice", "text": "hello!"},
+    {"time": 1712160010000, "type": "privmsg", "nick": "apricotbot", "text": "hi there"}
+  ]
+}
+```
+
+`messages` の各オブジェクト:
+
+| フィールド | 型 | 説明 |
+|------------|-----|------|
+| `time` | number | Unix ミリ秒 |
+| `type` | string | `privmsg` / `notice` / `join` / `part` / `quit` / `kick` / `nick` / `topic` / `mode` / `self` |
+| `nick` | string | 発言者 nick |
+| `text` | string | メッセージ本文（`nick` / `topic` 等では対象または新しい値） |
+
+最大 200 件（最新順ではなく時系列順）を返します。指定チャンネルのバッファが存在しない場合は `404` を返します。
+
 ---
 
 ## Cloudflare へのデプロイ
@@ -296,19 +327,20 @@ npm test
 | メソッド | パス | 認証 | 説明 |
 |----------|------|:----:|------|
 | `GET` | `/` または `/health` | ─ | ヘルスチェック |
-| `GET` | `/proxy/:id/connect` | ✅ Bearer | IRC サーバーへ接続 |
 | `GET` | `/proxy/:id/ws` | ─ | WebSocket 接続（IRC クライアント用） |
-| `GET` | `/proxy/:id/status` | ─ | 接続状態確認 |
 | `GET` | `/proxy/:id/web/` | ─ | チャンネル一覧ページ |
-| `GET` | `/proxy/:id/web/:channel` | ─ | チャンネルページ |
 | `GET` | `/proxy/:id/web/login` | ─ | Web UI ログイン画面 |
 | `POST` | `/proxy/:id/web/login` | ─ | Web UI ログイン |
 | `POST` | `/proxy/:id/web/logout` | ─ | Web UI ログアウト |
+| `GET` | `/proxy/:id/web/:channel` | ─ | チャンネルページ |
 | `POST` | `/proxy/:id/web/:channel` | ─ | Web フォームからメッセージ送信 |
+| `POST` | `/proxy/:id/api/connect` | ✅ Bearer | IRC サーバーへ接続 |
+| `POST` | `/proxy/:id/api/disconnect` | ✅ Bearer | IRC サーバー手動切断 API |
 | `POST` | `/proxy/:id/api/join` | ✅ Bearer | チャンネル参加 API |
 | `POST` | `/proxy/:id/api/post` | ✅ Bearer | 外部投稿 API |
 | `POST` | `/proxy/:id/api/nick` | ✅ Bearer | nick 変更 API |
-| `POST` | `/proxy/:id/api/disconnect` | ✅ Bearer | IRC サーバー手動切断 API |
+| `GET` | `/proxy/:id/api/logs/:channel` | ─ | チャンネルログ取得 API |
+| `GET` | `/proxy/:id/api/status` | ─ | 接続状態確認 |
 | `OPTIONS` | `/proxy/:id/api/*` | ─ | CORS プリフライト |
 
 ---
