@@ -12,6 +12,7 @@
  *   POST /proxy/:id/web/login — Web UI login
  *   POST /proxy/:id/web/logout — Web UI logout
  *   POST /proxy/:id/api/join — Join a channel (Bearer auth)
+ *   POST /proxy/:id/api/leave — Leave a channel (Bearer auth)
  *   POST /proxy/:id/api/post — Programmatic message posting (Bearer auth)
  *   POST /proxy/:id/api/nick — Change IRC nick (Bearer auth)
  *   POST /proxy/:id/api/disconnect — Disconnect from IRC server (Bearer auth)

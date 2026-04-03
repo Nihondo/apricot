@@ -157,6 +157,15 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/join \
 
 > **ヒント**: 接続時に自動参加させたい場合は、`wrangler.toml` の `IRC_AUTOJOIN` にチャンネルを指定してください。
 
+#### チャンネルから離脱する
+
+```bash
+curl -X POST http://localhost:8787/proxy/myproxy/api/leave \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key" \
+  -d '{"channel": "#general"}'
+```
+
 #### メッセージを投稿する
 
 ```bash
@@ -198,7 +207,7 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/nick \
   -d '{"nick": "apricot_alt"}'
 ```
 
-> **補足**: API は IRC サーバーへ `NICK` コマンドを送信します。実際の現在 nick は、サーバーからの `NICK` 応答を受信した時点で更新されます。
+> **補足**: サーバーの応答を待ってからレスポンスを返します。nick が使用中の場合は `433 ERR_NICKNAMEINUSE` 等のエラーメッセージが返ります。5 秒以内にサーバーが応答しない場合は `503` を返します。
 
 #### IRC サーバーから切断する
 
@@ -338,6 +347,7 @@ npm test
 | `POST` | `/proxy/:id/api/connect` | ✅ Bearer | IRC サーバーへ接続 |
 | `POST` | `/proxy/:id/api/disconnect` | ✅ Bearer | IRC サーバー手動切断 API |
 | `POST` | `/proxy/:id/api/join` | ✅ Bearer | チャンネル参加 API |
+| `POST` | `/proxy/:id/api/leave` | ✅ Bearer | チャンネル離脱 API |
 | `POST` | `/proxy/:id/api/post` | ✅ Bearer | 外部投稿 API |
 | `POST` | `/proxy/:id/api/nick` | ✅ Bearer | nick 変更 API |
 | `GET` | `/proxy/:id/api/logs/:channel` | ─ | チャンネルログ取得 API |

@@ -44,6 +44,13 @@ export class IrcProxyDO implements DurableObject {
   private connectPromise: Promise<void> | null = null;
   private suppressAutoReconnectOnClose = false;
 
+  /** Pending NICK change request waiting for server confirmation */
+  private pendingNickChange: {
+    resolve: (nick: string) => void;
+    reject: (error: string) => void;
+    timer: ReturnType<typeof setTimeout>;
+  } | null = null;
+
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
     this.config = buildProxyConfigFromEnv(env);
@@ -154,6 +161,11 @@ export class IrcProxyDO implements DurableObject {
     // POST /api/join — join a channel
     if (request.method === "POST" && url.pathname === "/api/join") {
       return this.handleApiJoin(request);
+    }
+
+    // POST /api/leave — leave a channel
+    if (request.method === "POST" && url.pathname === "/api/leave") {
+      return this.handleApiLeave(request);
     }
 
     // POST /api/post — programmatic message posting
@@ -384,6 +396,40 @@ export class IrcProxyDO implements DurableObject {
     return Response.json({ ok: true, channel }, { headers: corsHeaders() });
   }
 
+  private async handleApiLeave(request: Request): Promise<Response> {
+    let body: { channel?: string };
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json(
+        { error: "invalid JSON" },
+        { status: 400, headers: corsHeaders() }
+      );
+    }
+
+    const channel = body.channel;
+    if (!channel) {
+      return Response.json(
+        { error: "missing channel" },
+        { status: 400, headers: corsHeaders() }
+      );
+    }
+
+    if (!this.serverConn?.connected) {
+      return Response.json(
+        { error: "not connected to IRC server" },
+        { status: 503, headers: corsHeaders() }
+      );
+    }
+
+    await this.serverConn.send({
+      command: "PART",
+      params: [channel],
+    });
+
+    return Response.json({ ok: true, channel }, { headers: corsHeaders() });
+  }
+
   private async handleApiPost(request: Request): Promise<Response> {
     let body: { channel?: string; message?: string; url?: string };
     try {
@@ -475,7 +521,22 @@ export class IrcProxyDO implements DurableObject {
       params: [nick],
     });
 
-    return Response.json({ ok: true, nick }, { headers: corsHeaders() });
+    // Wait for server confirmation (success or error)
+    let confirmedNick: string;
+    try {
+      confirmedNick = await new Promise<string>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          this.pendingNickChange = null;
+          reject(new Error("timeout waiting for server response"));
+        }, 5000);
+        this.pendingNickChange = { resolve, reject, timer };
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      return Response.json({ error: msg }, { status: 503, headers: corsHeaders() });
+    }
+
+    return Response.json({ ok: true, nick: confirmedNick }, { headers: corsHeaders() });
   }
 
   private handleApiLogs(channel: string): Response {
@@ -648,7 +709,20 @@ export class IrcProxyDO implements DurableObject {
       const oldNick = msg.prefix.split("!")[0];
       if (oldNick.toLowerCase() === this.nick.toLowerCase()) {
         this.nick = msg.params[0];
+        if (this.pendingNickChange) {
+          clearTimeout(this.pendingNickChange.timer);
+          this.pendingNickChange.resolve(this.nick);
+          this.pendingNickChange = null;
+        }
       }
+    }
+
+    // Resolve/reject pending NICK change on server error replies
+    const nickErrorCodes = ["432", "433", "436", "437"];
+    if (nickErrorCodes.includes(cmd) && this.pendingNickChange) {
+      clearTimeout(this.pendingNickChange.timer);
+      this.pendingNickChange.reject(msg.params.slice(1).join(" "));
+      this.pendingNickChange = null;
     }
 
     // Dispatch through modules (ss_* handlers)

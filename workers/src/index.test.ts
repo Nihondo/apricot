@@ -43,6 +43,19 @@ describe("worker auth", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
+  it("requires bearer auth for /api/leave", async () => {
+    const { env, get } = makeEnv();
+
+    const response = await worker.fetch(
+      new Request("https://example.com/proxy/main/api/leave", { method: "POST" }),
+      env
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "unauthorized" });
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it("forwards /api/connect when bearer auth is present", async () => {
     const { env, fetch, get } = makeEnv();
 

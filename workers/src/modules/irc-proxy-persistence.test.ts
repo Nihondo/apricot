@@ -335,8 +335,10 @@ describe("IrcProxyDO web log persistence", () => {
       connected: true,
       send,
     };
+    (proxy as any).nick = "apricot";
 
-    const response = await proxy.fetch(new Request("https://example.com/api/nick", {
+    // Start request without awaiting — it will pause waiting for server confirmation
+    const responsePromise = proxy.fetch(new Request("https://example.com/api/nick", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -345,6 +347,19 @@ describe("IrcProxyDO web log persistence", () => {
       body: JSON.stringify({ nick: "apricot_alt" }),
     }));
 
+    // Yield until handleApiNick progresses to setting pendingNickChange
+    while (!(proxy as any).pendingNickChange) {
+      await Promise.resolve();
+    }
+
+    // Simulate server confirming the NICK change
+    await (proxy as any).handleServerMessage({
+      prefix: "apricot!user@host",
+      command: "NICK",
+      params: ["apricot_alt"],
+    });
+
+    const response = await responsePromise;
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({ ok: true, nick: "apricot_alt" });
     expect(send).toHaveBeenCalledWith({
@@ -393,6 +408,79 @@ describe("IrcProxyDO web log persistence", () => {
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "missing nick" });
+  });
+
+  it("sends PART when the leave API is called", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const send = vi.fn().mockResolvedValue(undefined);
+    (proxy as any).serverConn = {
+      connected: true,
+      send,
+    };
+
+    const response = await proxy.fetch(new Request("https://example.com/api/leave", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: JSON.stringify({ channel: "#general" }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, channel: "#general" });
+    expect(send).toHaveBeenCalledWith({
+      command: "PART",
+      params: ["#general"],
+    });
+  });
+
+  it("rejects leave API requests while disconnected", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const response = await proxy.fetch(new Request("https://example.com/api/leave", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: JSON.stringify({ channel: "#general" }),
+    }));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "not connected to IRC server" });
+  });
+
+  it("validates leave API input", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const response = await proxy.fetch(new Request("https://example.com/api/leave", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: JSON.stringify({ channel: "" }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "missing channel" });
   });
 
   it("disconnects from IRC via API", async () => {
