@@ -13,9 +13,12 @@ import { createClientSyncModule } from "./modules/client-sync";
 import { createWebModule, buildChannelListPage, type PersistedWebLogs } from "./modules/web";
 import { extractUrlMetadata } from "./modules/url-metadata";
 import { buildProxyConfigFromEnv, type ProxyConfig } from "./proxy-config";
+import CSS from "./templates/style.css";
+import LOGIN_TEMPLATE from "./templates/login.html";
 
 const reconnectDelayMs = 5_000;
 const webLogsStorageKey = "web:logs:v1";
+const webAuthCookieName = "apricot_web_auth";
 
 export class IrcProxyDO implements DurableObject {
   private state: DurableObjectState;
@@ -78,6 +81,17 @@ export class IrcProxyDO implements DurableObject {
     // index.ts injects this header so paths work from the browser's perspective.
     const proxyPrefix = request.headers.get("X-Proxy-Prefix") ?? "";
     const webBase = `${proxyPrefix}/web`;
+    const isWebLoginPath = url.pathname === "/web/login" || url.pathname === "/web/login/";
+    const isWebLogoutPath = url.pathname === "/web/logout" || url.pathname === "/web/logout/";
+    const isProtectedWebRequest = (
+      url.pathname === "/web" ||
+      url.pathname === "/web/" ||
+      /^\/web\/.+$/.test(url.pathname)
+    ) && !isWebLoginPath && !isWebLogoutPath;
+
+    if (isProtectedWebRequest && !await this.isWebAuthenticated(request, proxyPrefix)) {
+      return this.redirectToWebLogin(webBase);
+    }
 
     // GET /connect — connect to IRC server
     if (url.pathname === "/connect") {
@@ -151,6 +165,31 @@ export class IrcProxyDO implements DurableObject {
 
     // --- Web interface routes ---
 
+    // GET /web/login — login form for password-protected web UI
+    if (request.method === "GET" && isWebLoginPath) {
+      if (await this.isWebAuthenticated(request, proxyPrefix)) {
+        return new Response(null, {
+          status: 302,
+          headers: { Location: `${webBase}/` },
+        });
+      }
+      return this.renderWebLoginPage(`${webBase}/login`);
+    }
+
+    // POST /web/login — validate password and set session cookie
+    if (request.method === "POST" && isWebLoginPath) {
+      return this.handleWebLogin(request, proxyPrefix, webBase);
+    }
+
+    // POST /web/logout — clear session cookie
+    if (request.method === "POST" && isWebLogoutPath) {
+      return this.handleWebLogout(request, proxyPrefix, webBase);
+    }
+
+    if (isWebLoginPath || isWebLogoutPath) {
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+
     // GET /web — channel list
     if (url.pathname === "/web" || url.pathname === "/web/") {
       const html = buildChannelListPage(
@@ -158,7 +197,8 @@ export class IrcProxyDO implements DurableObject {
         this.nick,
         this.serverName,
         this.serverConn?.connected ?? false,
-        webBase
+        webBase,
+        Boolean(this.config?.password)
       );
       return new Response(html, {
         headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -204,7 +244,13 @@ export class IrcProxyDO implements DurableObject {
         this.channelStates.get(channel.toLowerCase())?.topic ||
         this.web.getChannelTopic(channel);
 
-      const html = this.web.buildChannelPage(channel, topic, this.nick, webBase);
+      const html = this.web.buildChannelPage(
+        channel,
+        topic,
+        this.nick,
+        webBase,
+        Boolean(this.config?.password)
+      );
       return new Response(html, {
         headers: { "Content-Type": "text/html; charset=utf-8" },
       });
@@ -658,6 +704,48 @@ export class IrcProxyDO implements DurableObject {
     await this.state.storage.setAlarm(Date.now() + reconnectDelayMs);
   }
 
+  private async handleWebLogin(
+    request: Request,
+    proxyPrefix: string,
+    webBase: string
+  ): Promise<Response> {
+    if (!this.config?.password) {
+      return new Response(null, {
+        status: 302,
+        headers: { Location: `${webBase}/` },
+      });
+    }
+
+    const formData = await request.formData();
+    const password = (formData.get("password") as string | null)?.trim() ?? "";
+    if (password !== this.config.password) {
+      return this.renderWebLoginPage(`${webBase}/login`, "パスワードが違います", 401);
+    }
+
+    const cookieValue = await this.buildWebAuthCookieValue(proxyPrefix);
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: `${webBase}/`,
+        "Set-Cookie": this.buildWebAuthCookie(cookieValue, `${proxyPrefix}/web`, request.url),
+      },
+    });
+  }
+
+  private async handleWebLogout(
+    request: Request,
+    proxyPrefix: string,
+    webBase: string
+  ): Promise<Response> {
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: `${webBase}/login`,
+        "Set-Cookie": this.buildExpiredWebAuthCookie(`${proxyPrefix}/web`, request.url),
+      },
+    });
+  }
+
   private async loadPersistedWebLogs(): Promise<void> {
     const logs = await this.state.storage.get<PersistedWebLogs>(webLogsStorageKey);
     this.web.hydrateLogs(logs ?? null);
@@ -673,6 +761,93 @@ export class IrcProxyDO implements DurableObject {
     } catch (error) {
       console.error("Failed to persist web logs", error);
     }
+  }
+
+  private async isWebAuthenticated(request: Request, proxyPrefix: string): Promise<boolean> {
+    if (!this.config?.password) {
+      return true;
+    }
+
+    const cookies = this.parseCookies(request.headers.get("Cookie"));
+    const actual = cookies.get(webAuthCookieName);
+    if (!actual) {
+      return false;
+    }
+
+    const expected = await this.buildWebAuthCookieValue(proxyPrefix);
+    return actual === expected;
+  }
+
+  private parseCookies(cookieHeader: string | null): Map<string, string> {
+    const cookies = new Map<string, string>();
+    if (!cookieHeader) {
+      return cookies;
+    }
+
+    for (const entry of cookieHeader.split(";")) {
+      const [rawName, ...rawValue] = entry.trim().split("=");
+      if (!rawName) continue;
+      cookies.set(rawName, rawValue.join("="));
+    }
+    return cookies;
+  }
+
+  private async buildWebAuthCookieValue(proxyPrefix: string): Promise<string> {
+    const source = `${proxyPrefix}:${this.config?.password ?? ""}`;
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
+    return Array.from(new Uint8Array(digest))
+      .map((value) => value.toString(16).padStart(2, "0"))
+      .join("");
+  }
+
+  private buildWebAuthCookie(value: string, path: string, requestUrl: string): string {
+    const isSecure = new URL(requestUrl).protocol === "https:";
+    return [
+      `${webAuthCookieName}=${value}`,
+      `Path=${path}`,
+      "HttpOnly",
+      "SameSite=Strict",
+      ...(isSecure ? ["Secure"] : []),
+    ].join("; ");
+  }
+
+  private buildExpiredWebAuthCookie(path: string, requestUrl: string): string {
+    const isSecure = new URL(requestUrl).protocol === "https:";
+    return [
+      `${webAuthCookieName}=`,
+      `Path=${path}`,
+      "HttpOnly",
+      "SameSite=Strict",
+      "Max-Age=0",
+      ...(isSecure ? ["Secure"] : []),
+    ].join("; ");
+  }
+
+  private renderWebLoginPage(
+    actionUrl: string,
+    errorMessage = "",
+    status = 200
+  ): Response {
+    const errorHtml = errorMessage
+      ? `<div class="login-error">${errorMessage}</div>`
+      : "";
+
+    const html = LOGIN_TEMPLATE
+      .replace("{{CSS}}", CSS)
+      .replace("{{ERROR}}", errorHtml)
+      .replace("{{ACTION_URL}}", actionUrl);
+
+    return new Response(html, {
+      status,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
+  private redirectToWebLogin(webBase: string): Response {
+    return new Response(null, {
+      status: 302,
+      headers: { Location: `${webBase}/login` },
+    });
   }
 }
 

@@ -5,9 +5,14 @@ vi.mock("cloudflare:sockets", () => ({
 }));
 vi.mock("../templates/style.css", () => ({ default: "" }));
 vi.mock("../templates/channel.html", () => ({
-  default: "<html><body><h1>{{CHANNEL}}</h1><div>{{TOPIC}}</div>{{MESSAGES}}</body></html>",
+  default: "<html><body><form action=\"{{LOGOUT_URL}}\"></form><h1>{{CHANNEL}}</h1><div>{{TOPIC}}</div>{{MESSAGES}}</body></html>",
 }));
-vi.mock("../templates/channel-list.html", () => ({ default: "{{CHANNEL_LINKS}}" }));
+vi.mock("../templates/channel-list.html", () => ({
+  default: "<html><body><form action=\"{{LOGOUT_URL}}\"></form>{{CHANNEL_LINKS}}</body></html>",
+}));
+vi.mock("../templates/login.html", () => ({
+  default: "<html><body>{{ERROR}}<form action=\"{{ACTION_URL}}\" method=\"POST\"><input name=\"password\"></form></body></html>",
+}));
 
 import { IrcProxyDO } from "../irc-proxy";
 import type { PersistedWebLogs } from "./web";
@@ -74,6 +79,21 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
 }
 
 describe("IrcProxyDO web log persistence", () => {
+  it("keeps web UI public when CLIENT_PASSWORD is not configured", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: undefined })
+    );
+    await state.initPromise;
+
+    const response = await proxy.fetch(new Request("https://example.com/web/", {
+      headers: { "X-Proxy-Prefix": "/proxy/main" },
+    }));
+
+    expect(response.status).toBe(200);
+  });
+
   it("hydrates persisted logs into the restored web page", async () => {
     const state = new FakeState();
     state.storage.seed(webLogsStorageKey, {
@@ -156,6 +176,150 @@ describe("IrcProxyDO web log persistence", () => {
       nick: "apricot",
       text: "hello from self",
     });
+  });
+
+  it("redirects unauthenticated web requests to the login page", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+
+    const response = await proxy.fetch(new Request("https://example.com/web/", {
+      headers: { "X-Proxy-Prefix": "/proxy/main" },
+    }));
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/proxy/main/web/login");
+  });
+
+  it("renders login page errors with 401 on wrong password", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+
+    const response = await proxy.fetch(new Request("https://example.com/web/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "password=wrong",
+    }));
+
+    expect(response.status).toBe(401);
+    expect(await response.text()).toContain("パスワードが違います");
+  });
+
+  it("issues a cookie for correct web login and allows authenticated access", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+
+    const loginResponse = await proxy.fetch(new Request("https://example.com/web/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "password=secret",
+    }));
+
+    expect(loginResponse.status).toBe(302);
+    expect(loginResponse.headers.get("Location")).toBe("/proxy/main/web/");
+
+    const setCookie = loginResponse.headers.get("Set-Cookie");
+    expect(setCookie).toContain("apricot_web_auth=");
+    expect(setCookie).toContain("Path=/proxy/main/web");
+    expect(setCookie).toContain("HttpOnly");
+    expect(setCookie).toContain("SameSite=Strict");
+
+    const cookieHeader = setCookie?.split(";")[0] ?? "";
+    const pageResponse = await proxy.fetch(new Request("https://example.com/web/", {
+      headers: {
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+    }));
+
+    expect(pageResponse.status).toBe(200);
+  });
+
+  it("requires the auth cookie for posting from the web UI", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+
+    (proxy as any).serverConn = {
+      connected: true,
+      send: vi.fn(),
+    };
+
+    const blockedResponse = await proxy.fetch(new Request("https://example.com/web/%23general", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "message=hello",
+    }));
+    expect(blockedResponse.status).toBe(302);
+    expect(blockedResponse.headers.get("Location")).toBe("/proxy/main/web/login");
+
+    const loginResponse = await proxy.fetch(new Request("https://example.com/web/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "password=secret",
+    }));
+    const cookieHeader = loginResponse.headers.get("Set-Cookie")?.split(";")[0] ?? "";
+
+    const allowedResponse = await proxy.fetch(new Request("https://example.com/web/%23general", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "message=hello",
+    }));
+
+    expect(allowedResponse.status).toBe(302);
+    expect(allowedResponse.headers.get("Location")).toBe("/proxy/main/web/%23general");
+    expect((proxy as any).serverConn.send).toHaveBeenCalledWith({
+      command: "PRIVMSG",
+      params: ["#general", "hello"],
+    });
+  });
+
+  it("clears the cookie on logout", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+
+    const response = await proxy.fetch(new Request("https://example.com/web/logout", {
+      method: "POST",
+      headers: { "X-Proxy-Prefix": "/proxy/main" },
+    }));
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/proxy/main/web/login");
+    expect(response.headers.get("Set-Cookie")).toContain("Max-Age=0");
   });
 
   it("sends NICK when the nick-change API is called", async () => {

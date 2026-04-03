@@ -117,7 +117,7 @@ npm test
 | `IRC_REALNAME` | ─ | `apricot IRC Proxy` | IRC リアルネーム |
 | `IRC_TLS` | ─ | `false` | TLS 使用（`true` / `false`） |
 | `IRC_PASSWORD` | ─ | ─ | IRC サーバーパスワード（secret 推奨） |
-| `CLIENT_PASSWORD` | ─ | ─ | クライアント接続パスワード（secret 推奨） |
+| `CLIENT_PASSWORD` | ─ | ─ | WebSocket クライアント接続と Web UI ログインの共通パスワード（secret 推奨） |
 | `IRC_AUTO_CONNECT_ON_STARTUP` | ─ | `false` | Durable Object インスタンス起動時に IRC へ接続開始 |
 | `IRC_AUTO_RECONNECT_ON_DISCONNECT` | ─ | `false` | IRC 切断時に 5 秒後の自動再接続を有効化 |
 | `IRC_AUTOJOIN` | ─ | ─ | 自動参加チャンネル（カンマ区切り、例: `#general,#test`） |
@@ -216,10 +216,16 @@ http://localhost:8787/proxy/myproxy/web/
 - メッセージは最新 200 件をインメモリに保持（新しい順に表示）
 - Web UI のログは Durable Object storage にも保存され、DO 再起動後も再接続して同じチャンネルに参加すると表示を復元
 - 保存済みログだけではチャンネル一覧は増えず、再参加したチャンネルのみ一覧に表示
+- `CLIENT_PASSWORD` を設定すると Web UI もログイン必須になり、未設定時は従来どおり公開
 - 30 秒ごとに自動リフレッシュ（入力中は停止）
 - ダーク／ライトモード自動切替（`prefers-color-scheme` 対応）
 - URL は自動リンク化
 - `TIMEZONE_OFFSET` で時刻表示のタイムゾーンを設定可能（デフォルト UTC）
+
+### Web UI ログイン
+
+`CLIENT_PASSWORD` が設定されている場合、`/proxy/:id/web/login` でログインしてから Web UI を利用します。
+認証は proxy ID ごとの HttpOnly Cookie で保持されます。
 
 ---
 
@@ -367,6 +373,9 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 | `GET` | `/proxy/:id/status` | ─ | 接続状態確認 |
 | `GET` | `/proxy/:id/web/` | ─ | チャンネル一覧ページ |
 | `GET` | `/proxy/:id/web/:channel` | ─ | チャンネルページ |
+| `GET` | `/proxy/:id/web/login` | ─ | Web UI ログイン画面 |
+| `POST` | `/proxy/:id/web/login` | ─ | Web UI ログイン |
+| `POST` | `/proxy/:id/web/logout` | ─ | Web UI ログアウト |
 | `POST` | `/proxy/:id/web/:channel` | ─ | Web フォームからメッセージ送信 |
 | `POST` | `/proxy/:id/api/join` | ✅ Bearer | チャンネル参加 API |
 | `POST` | `/proxy/:id/api/post` | ✅ Bearer | 外部投稿 API |

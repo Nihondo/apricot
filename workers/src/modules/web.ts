@@ -129,7 +129,8 @@ export function buildChannelListPage(
   nick: string,
   serverName: string,
   connected: boolean,
-  basePath: string
+  basePath: string,
+  showLogout = false
 ): string {
   const chLinks = channels.length === 0
     ? "<p>No channels joined.</p>"
@@ -142,6 +143,12 @@ export function buildChannelListPage(
     .replace("{{STATUS_ICON}}", connected ? "&#x1f7e2;" : "&#x1f534;")
     .replace("{{NICK}}", escapeHtml(nick))
     .replace("{{SERVER_NAME}}", escapeHtml(serverName))
+    .replace(
+      "{{LOGOUT_FORM}}",
+      showLogout
+        ? `<div class="web-auth-bar"><form action="${basePath}/logout" method="POST"><input type="submit" value="Logout" class="logout-button"></form></div>`
+        : ""
+    )
     .replace("{{CHANNEL_LINKS}}", chLinks);
 }
 
@@ -300,7 +307,8 @@ export function createWebModule(
     channel: string,
     topic: string,
     selfNick: string,
-    basePath: string
+    basePath: string,
+    showLogout = false
   ): string {
     const buf = getBuffer(channel);
     const reversed = [...buf].reverse();
@@ -315,6 +323,12 @@ export function createWebModule(
 
     return CHANNEL_TEMPLATE
       .replace("{{CSS}}", CSS)
+      .replace(
+        "{{LOGOUT_FORM}}",
+        showLogout
+          ? `<div class="web-auth-bar"><form action="${basePath}/logout" method="POST"><input type="submit" value="Logout" class="logout-button"></form></div>`
+          : ""
+      )
       .replace("{{CHANNEL}}", escapeHtml(channel))
       .replace("{{TOPIC}}", escapeHtml(topic))
       .replace("{{ACTION_URL}}", actionUrl)

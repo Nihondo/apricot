@@ -7,7 +7,10 @@
  *   GET  /proxy/:id/status  — Get proxy status
  *   GET  /proxy/:id/web/    — Web chat interface (channel list)
  *   GET  /proxy/:id/web/:ch — Web chat interface (channel view)
+ *   GET  /proxy/:id/web/login — Web UI login form
  *   POST /proxy/:id/web/:ch — Send message via web interface
+ *   POST /proxy/:id/web/login — Web UI login
+ *   POST /proxy/:id/web/logout — Web UI logout
  *   POST /proxy/:id/api/join — Join a channel (Bearer auth)
  *   POST /proxy/:id/api/post — Programmatic message posting (Bearer auth)
  *   POST /proxy/:id/api/nick — Change IRC nick (Bearer auth)

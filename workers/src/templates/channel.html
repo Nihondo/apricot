@@ -23,6 +23,7 @@ window.addEventListener('load', function () {
 </head>
 <body>
 <div style="margin:5px;">
+  {{LOGOUT_FORM}}
   <div class="topic">Topic: {{TOPIC}}</div>
   <form action="{{ACTION_URL}}" method="POST">
     <input type="text" name="message" size="10" class="message-input" autocomplete="off"><input type="submit" value="OK" class="submit-button" onclick="sessionStorage.setItem('justPosted','true');">
