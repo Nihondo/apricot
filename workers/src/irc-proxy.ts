@@ -144,6 +144,11 @@ export class IrcProxyDO implements DurableObject {
       return this.handleApiPost(request);
     }
 
+    // POST /api/nick — request a nick change
+    if (request.method === "POST" && url.pathname === "/api/nick") {
+      return this.handleApiNick(request);
+    }
+
     // --- Web interface routes ---
 
     // GET /web — channel list
@@ -377,6 +382,40 @@ export class IrcProxyDO implements DurableObject {
     });
 
     return Response.json({ ok: true, message: text, channel }, { headers: corsHeaders() });
+  }
+
+  private async handleApiNick(request: Request): Promise<Response> {
+    let body: { nick?: string };
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json(
+        { error: "invalid JSON" },
+        { status: 400, headers: corsHeaders() }
+      );
+    }
+
+    const nick = body.nick?.trim();
+    if (!nick) {
+      return Response.json(
+        { error: "missing nick" },
+        { status: 400, headers: corsHeaders() }
+      );
+    }
+
+    if (!this.serverConn?.connected) {
+      return Response.json(
+        { error: "not connected to IRC server" },
+        { status: 503, headers: corsHeaders() }
+      );
+    }
+
+    await this.serverConn.send({
+      command: "NICK",
+      params: [nick],
+    });
+
+    return Response.json({ ok: true, nick }, { headers: corsHeaders() });
   }
 
   // --- Private methods ---

@@ -157,4 +157,77 @@ describe("IrcProxyDO web log persistence", () => {
       text: "hello from self",
     });
   });
+
+  it("sends NICK when the nick-change API is called", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const send = vi.fn();
+    (proxy as any).serverConn = {
+      connected: true,
+      send,
+    };
+
+    const response = await proxy.fetch(new Request("https://example.com/api/nick", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: JSON.stringify({ nick: "apricot_alt" }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, nick: "apricot_alt" });
+    expect(send).toHaveBeenCalledWith({
+      command: "NICK",
+      params: ["apricot_alt"],
+    });
+  });
+
+  it("rejects nick-change API requests while disconnected", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const response = await proxy.fetch(new Request("https://example.com/api/nick", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: JSON.stringify({ nick: "apricot_alt" }),
+    }));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "not connected to IRC server" });
+  });
+
+  it("validates nick-change API input", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const response = await proxy.fetch(new Request("https://example.com/api/nick", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: JSON.stringify({ nick: "   " }),
+    }));
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toEqual({ error: "missing nick" });
+  });
 });

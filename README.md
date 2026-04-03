@@ -306,6 +306,23 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/post \
 {"ok": true, "message": "記事タイトル https://...", "channel": "#general"}
 ```
 
+### nick 変更
+
+```bash
+curl -X POST http://localhost:8787/proxy/myproxy/api/nick \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key" \
+  -d '{"nick": "apricot_alt"}'
+```
+
+レスポンス例:
+
+```json
+{"ok": true, "nick": "apricot_alt"}
+```
+
+> **補足**: API は IRC サーバーへ `NICK` コマンドを送信します。実際の現在 nick は、サーバーからの `NICK` 応答を受信した時点で更新されます。
+
 ---
 
 ## デプロイ
@@ -353,4 +370,5 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 | `POST` | `/proxy/:id/web/:channel` | ─ | Web フォームからメッセージ送信 |
 | `POST` | `/proxy/:id/api/join` | ✅ Bearer | チャンネル参加 API |
 | `POST` | `/proxy/:id/api/post` | ✅ Bearer | 外部投稿 API |
+| `POST` | `/proxy/:id/api/nick` | ✅ Bearer | nick 変更 API |
 | `OPTIONS` | `/proxy/:id/api/*` | ─ | CORS プリフライト |

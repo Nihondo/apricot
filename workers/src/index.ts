@@ -10,6 +10,7 @@
  *   POST /proxy/:id/web/:ch — Send message via web interface
  *   POST /proxy/:id/api/join — Join a channel (Bearer auth)
  *   POST /proxy/:id/api/post — Programmatic message posting (Bearer auth)
+ *   POST /proxy/:id/api/nick — Change IRC nick (Bearer auth)
  *   GET  /                   — Health check
  */
 
