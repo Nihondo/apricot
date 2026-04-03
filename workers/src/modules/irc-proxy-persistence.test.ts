@@ -406,6 +406,80 @@ describe("IrcProxyDO web log persistence", () => {
     });
   });
 
+  it("accepts nick changes when the confirmation has no prefix but matches the requested nick", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const send = vi.fn(async () => {
+      await (proxy as any).handleServerMessage({
+        command: "NICK",
+        params: ["apricot_alt"],
+      });
+    });
+    (proxy as any).serverConn = {
+      connected: true,
+      send,
+    };
+    (proxy as any).nick = "apricot";
+
+    const response = await proxy.fetch(new Request("https://example.com/api/nick", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: JSON.stringify({ nick: "apricot_alt" }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true, nick: "apricot_alt" });
+  });
+
+  it("returns nick-related server errors instead of timing out", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const send = vi.fn();
+    (proxy as any).serverConn = {
+      connected: true,
+      send,
+    };
+    (proxy as any).nick = "apricot";
+
+    const responsePromise = proxy.fetch(new Request("https://example.com/api/nick", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: JSON.stringify({ nick: "apricot_alt" }),
+    }));
+
+    while (!(proxy as any).pendingNickChange) {
+      await Promise.resolve();
+    }
+
+    await (proxy as any).handleServerMessage({
+      prefix: "irc.example.com",
+      command: "438",
+      params: ["apricot", "apricot_alt", "Nick change too fast. Please wait a while and try again."],
+    });
+
+    const response = await responsePromise;
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({
+      error: "Nick change too fast. Please wait a while and try again.",
+    });
+  });
+
   it("rejects nick-change API requests while disconnected", async () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(

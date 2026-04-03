@@ -19,6 +19,7 @@ import LOGIN_TEMPLATE from "./templates/login.html";
 const reconnectDelayMs = 5_000;
 const webLogsStorageKey = "web:logs:v1";
 const webAuthCookieName = "apricot_web_auth";
+const nickErrorCodes = new Set(["431", "432", "433", "436", "437", "438", "447", "484", "485"]);
 
 export class IrcProxyDO implements DurableObject {
   private state: DurableObjectState;
@@ -46,6 +47,7 @@ export class IrcProxyDO implements DurableObject {
 
   /** Pending NICK change request waiting for server confirmation */
   private pendingNickChange: {
+    requestedNick: string;
     resolve: (nick: string) => void;
     reject: (error: string) => void;
     timer: ReturnType<typeof setTimeout>;
@@ -522,7 +524,7 @@ export class IrcProxyDO implements DurableObject {
         this.pendingNickChange = null;
         reject(new Error("timeout waiting for server response"));
       }, 5000);
-      pendingNickChange = { resolve, reject, timer };
+      pendingNickChange = { requestedNick: nick, resolve, reject, timer };
       this.pendingNickChange = pendingNickChange;
     });
 
@@ -549,6 +551,20 @@ export class IrcProxyDO implements DurableObject {
     }
 
     return Response.json({ ok: true, nick: confirmedNick }, { headers: corsHeaders() });
+  }
+
+  private resolvePendingNickChange(nick: string): void {
+    if (!this.pendingNickChange) return;
+    clearTimeout(this.pendingNickChange.timer);
+    this.pendingNickChange.resolve(nick);
+    this.pendingNickChange = null;
+  }
+
+  private rejectPendingNickChange(error: string): void {
+    if (!this.pendingNickChange) return;
+    clearTimeout(this.pendingNickChange.timer);
+    this.pendingNickChange.reject(error);
+    this.pendingNickChange = null;
   }
 
   private handleApiLogs(channel: string): Response {
@@ -717,24 +733,23 @@ export class IrcProxyDO implements DurableObject {
     }
 
     // Handle NICK change for self
-    if (cmd === "NICK" && msg.prefix) {
-      const oldNick = msg.prefix.split("!")[0];
-      if (oldNick.toLowerCase() === this.nick.toLowerCase()) {
-        this.nick = msg.params[0];
-        if (this.pendingNickChange) {
-          clearTimeout(this.pendingNickChange.timer);
-          this.pendingNickChange.resolve(this.nick);
-          this.pendingNickChange = null;
-        }
+    if (cmd === "NICK") {
+      const nextNick = msg.params[0];
+      const oldNick = msg.prefix?.split("!")[0];
+      const matchesPendingNick = this.pendingNickChange &&
+        nextNick?.toLowerCase() === this.pendingNickChange.requestedNick.toLowerCase();
+
+      if ((oldNick && oldNick.toLowerCase() === this.nick.toLowerCase()) || matchesPendingNick) {
+        this.nick = nextNick;
+        this.resolvePendingNickChange(this.nick);
       }
     }
 
     // Resolve/reject pending NICK change on server error replies
-    const nickErrorCodes = ["432", "433", "436", "437"];
-    if (nickErrorCodes.includes(cmd) && this.pendingNickChange) {
-      clearTimeout(this.pendingNickChange.timer);
-      this.pendingNickChange.reject(msg.params.slice(1).join(" "));
-      this.pendingNickChange = null;
+    if (cmd === "FAIL" && this.pendingNickChange && msg.params[0]?.toUpperCase() === "NICK") {
+      this.rejectPendingNickChange(msg.params.at(-1) || "nick change failed");
+    } else if (nickErrorCodes.has(cmd) && this.pendingNickChange) {
+      this.rejectPendingNickChange(msg.params.at(-1) || "nick change failed");
     }
 
     // Dispatch through modules (ss_* handlers)
