@@ -394,4 +394,64 @@ describe("IrcProxyDO web log persistence", () => {
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: "missing nick" });
   });
+
+  it("disconnects from IRC via API", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const close = vi.fn().mockResolvedValue(undefined);
+    (proxy as any).serverConn = {
+      connected: true,
+      close,
+    };
+
+    const response = await proxy.fetch(new Request("https://example.com/api/disconnect", {
+      method: "POST",
+      headers: {
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ ok: true });
+    expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects disconnect API requests while disconnected", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const response = await proxy.fetch(new Request("https://example.com/api/disconnect", {
+      method: "POST",
+      headers: {
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+    }));
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "not connected to IRC server" });
+  });
+
+  it("suppresses auto reconnect after manual disconnect", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ IRC_AUTO_RECONNECT_ON_DISCONNECT: "true" })
+    );
+    await state.initPromise;
+
+    (proxy as any).suppressAutoReconnectOnClose = true;
+
+    expect((proxy as any).consumeAutoReconnectOnClose()).toBe(false);
+    expect((proxy as any).suppressAutoReconnectOnClose).toBe(false);
+    expect((proxy as any).consumeAutoReconnectOnClose()).toBe(true);
+  });
 });

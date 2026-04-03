@@ -177,7 +177,8 @@ npx wrangler secret put CLIENT_PASSWORD      # 必要な場合のみ
 ### IRC サーバーへ接続する
 
 ```bash
-curl http://localhost:8787/proxy/myproxy/connect
+curl http://localhost:8787/proxy/myproxy/connect \
+  -H "Authorization: Bearer your-api-key"
 ```
 
 接続は非同期で開始されます。状態確認:
@@ -329,6 +330,21 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/nick \
 
 > **補足**: API は IRC サーバーへ `NICK` コマンドを送信します。実際の現在 nick は、サーバーからの `NICK` 応答を受信した時点で更新されます。
 
+### 切断
+
+```bash
+curl -X POST http://localhost:8787/proxy/myproxy/api/disconnect \
+  -H "Authorization: Bearer your-api-key"
+```
+
+レスポンス例:
+
+```json
+{"ok": true}
+```
+
+> **補足**: API での手動切断は `IRC_AUTO_RECONNECT_ON_DISCONNECT=true` でも自動再接続を行いません。
+
 ---
 
 ## デプロイ
@@ -368,7 +384,7 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 | メソッド | パス | 認証 | 説明 |
 |----------|------|:----:|------|
 | `GET` | `/` または `/health` | ─ | ヘルスチェック |
-| `GET` | `/proxy/:id/connect` | ─ | IRC サーバーへ接続 |
+| `GET` | `/proxy/:id/connect` | ✅ Bearer | IRC サーバーへ接続 |
 | `GET` | `/proxy/:id/ws` | ─ | WebSocket 接続（IRC クライアント用） |
 | `GET` | `/proxy/:id/status` | ─ | 接続状態確認 |
 | `GET` | `/proxy/:id/web/` | ─ | チャンネル一覧ページ |
@@ -380,4 +396,5 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 | `POST` | `/proxy/:id/api/join` | ✅ Bearer | チャンネル参加 API |
 | `POST` | `/proxy/:id/api/post` | ✅ Bearer | 外部投稿 API |
 | `POST` | `/proxy/:id/api/nick` | ✅ Bearer | nick 変更 API |
+| `POST` | `/proxy/:id/api/disconnect` | ✅ Bearer | IRC サーバー手動切断 API |
 | `OPTIONS` | `/proxy/:id/api/*` | ─ | CORS プリフライト |

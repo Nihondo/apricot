@@ -42,6 +42,7 @@ export class IrcProxyDO implements DurableObject {
   /** Keepalive alarm interval in ms */
   private keepaliveMs: number;
   private connectPromise: Promise<void> | null = null;
+  private suppressAutoReconnectOnClose = false;
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
@@ -161,6 +162,11 @@ export class IrcProxyDO implements DurableObject {
     // POST /api/nick — request a nick change
     if (request.method === "POST" && url.pathname === "/api/nick") {
       return this.handleApiNick(request);
+    }
+
+    // POST /api/disconnect — disconnect from IRC server
+    if (request.method === "POST" && url.pathname === "/api/disconnect") {
+      return this.handleApiDisconnect();
     }
 
     // --- Web interface routes ---
@@ -464,6 +470,21 @@ export class IrcProxyDO implements DurableObject {
     return Response.json({ ok: true, nick }, { headers: corsHeaders() });
   }
 
+  private async handleApiDisconnect(): Promise<Response> {
+    if (!this.serverConn?.connected) {
+      return Response.json(
+        { error: "not connected to IRC server" },
+        { status: 503, headers: corsHeaders() }
+      );
+    }
+
+    this.suppressAutoReconnectOnClose = true;
+    await this.state.storage.deleteAlarm();
+    await this.serverConn.close();
+
+    return Response.json({ ok: true }, { headers: corsHeaders() });
+  }
+
   // --- Private methods ---
 
   private async handleClientRegistration(
@@ -560,7 +581,7 @@ export class IrcProxyDO implements DurableObject {
             params: ["*", "Disconnected from IRC server"],
           });
 
-          if (this.config?.autoReconnectOnDisconnect) {
+          if (this.consumeAutoReconnectOnClose()) {
             await this.scheduleReconnectAlarm();
           }
         }
@@ -702,6 +723,13 @@ export class IrcProxyDO implements DurableObject {
 
   private async scheduleReconnectAlarm(): Promise<void> {
     await this.state.storage.setAlarm(Date.now() + reconnectDelayMs);
+  }
+
+  private consumeAutoReconnectOnClose(): boolean {
+    const shouldReconnect = Boolean(this.config?.autoReconnectOnDisconnect)
+      && !this.suppressAutoReconnectOnClose;
+    this.suppressAutoReconnectOnClose = false;
+    return shouldReconnect;
   }
 
   private async handleWebLogin(
