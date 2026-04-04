@@ -101,13 +101,17 @@ http://localhost:8787/proxy/myproxy/web/
 |-----|------|
 | `/proxy/:id/web/` | 参加中チャンネル一覧 |
 | `/proxy/:id/web/settings` | Web UI の表示設定 |
-| `/proxy/:id/web/:channel` | チャンネルのメッセージ表示・送信フォーム |
+| `/proxy/:id/web/:channel` | チャンネルシェル画面 |
+| `/proxy/:id/web/:channel/messages` | メッセージ一覧フレーム |
+| `/proxy/:id/web/:channel/composer` | 入力フォームフレーム |
 
 **主な機能**:
 
 - メッセージは最新 `WEB_LOG_MAX_LINES` 件をインメモリに保持（デフォルト 200 件、新しい順に表示）
 - Durable Object storage にもログを保存し、DO 再起動後も再接続で表示を復元
-- 30 秒ごとに自動リフレッシュ（入力中は停止）
+- チャンネル画面は shell + messages + composer の iframe 2 分割で構成
+- 30 秒ごとの自動リフレッシュは messages フレームだけで実行
+- `displayOrder=asc`（古い順）では初期表示時に最下部まで自動スクロール
 - URL は自動リンク化
 - `TIMEZONE_OFFSET` で時刻表示のタイムゾーンを設定可能（デフォルト UTC）
 - チャンネル一覧、設定画面、ログイン画面は固定のモダンUIで表示
@@ -352,8 +356,10 @@ npm test
 | `GET` | `/proxy/:id/web/login` | ─ | Web UI ログイン画面 |
 | `POST` | `/proxy/:id/web/login` | ─ | Web UI ログイン |
 | `POST` | `/proxy/:id/web/logout` | ─ | Web UI ログアウト |
-| `GET` | `/proxy/:id/web/:channel` | ─ | チャンネルページ |
-| `POST` | `/proxy/:id/web/:channel` | ─ | Web フォームからメッセージ送信 |
+| `GET` | `/proxy/:id/web/:channel` | ─ | チャンネルシェルページ |
+| `GET` | `/proxy/:id/web/:channel/messages` | ─ | チャンネルのメッセージ一覧 |
+| `GET` | `/proxy/:id/web/:channel/composer` | ─ | チャンネルの入力フォーム |
+| `POST` | `/proxy/:id/web/:channel/composer` | ─ | Web フォームからメッセージ送信 |
 | `POST` | `/proxy/:id/api/connect` | ✅ Bearer | IRC サーバーへ接続 |
 | `POST` | `/proxy/:id/api/disconnect` | ✅ Bearer | IRC サーバー手動切断 API |
 | `POST` | `/proxy/:id/api/join` | ✅ Bearer | チャンネル参加 API |

@@ -33,12 +33,14 @@
   }
 }
 * { box-sizing: border-box; }
+html { height: 100%; }
 body {
   font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
   line-height: 1.5;
   color: var(--textcolor);
   background-color: var(--rowcolor0);
-  margin: 0; padding: 0;
+  margin: 0;
+  padding: 0;
 }
 div { word-wrap: break-word; }
 div.color0:has(a) { color: var(--accent-highlight); }
@@ -49,6 +51,41 @@ hr { border: none; border-top: 1px solid var(--border-color); margin: 5px 0; }
 .timestamp { color: var(--accent-timestamp); }
 .username-self { color: var(--accent-self); font-weight: bold; }
 .username-other { color: var(--accent-username); font-weight: bold; }
+.channel-shell-page {
+  height: 100dvh;
+  overflow: hidden;
+}
+.channel-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+.channel-frame {
+  width: 100%;
+  border: none;
+  background-color: var(--rowcolor0);
+}
+.channel-frame--messages {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+.channel-frame--composer {
+  flex: 0 0 52px;
+  height: 52px;
+}
+.channel-messages-page {
+  padding: 5px;
+}
+.channel-messages-shell {
+  min-height: calc(100% - 10px);
+}
+.channel-composer-page {
+  padding: 5px;
+  background-color: var(--rowcolor0);
+}
+.channel-composer-shell {
+  background-color: var(--rowcolor0);
+}
 a {
   color: var(--accent-link);
   display: inline-block;
@@ -63,13 +100,6 @@ a {
 a:hover { text-decoration: underline; }
 input:focus { outline: none; }
 .topic { font-weight: bold; margin-bottom: 5px; }
-.input-bar {
-  position: fixed; left: 0; z-index: 2;
-  width: 100%;
-  background-color: var(--rowcolor0);
-}
-.top { top: 0; }
-.bottom { bottom: 0; }
 .message-form {
   display: flex;
   align-items: stretch;
@@ -124,7 +154,10 @@ input:focus { outline: none; }
 }
 .floating {
   -webkit-appearance: none; appearance: none;
-  position: fixed; bottom: 10px; left: 50%; z-index: 1;
+  position: fixed;
+  right: 10px;
+  bottom: 10px;
+  z-index: 1;
   height: 60px; width: 60px;
   font-size: 0.7em; opacity: 0.5;
   border-radius: 50%; border: none;

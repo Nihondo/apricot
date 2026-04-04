@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html><head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, user-scalable=no">
+<title>IRC: {{CHANNEL}}/Composer</title>
+<style>{{CSS}}</style>
+<script>
+window.addEventListener('load', function () {
+  var input = document.querySelector('.message-input');
+  if (input) {
+    input.focus();
+  }
+  {{ON_LOAD_SCRIPT}}
+});
+</script>
+</head>
+<body class="channel-composer-page">
+<div class="channel-composer-shell">
+  {{FLASH_MESSAGE}}
+  <form action="{{ACTION_URL}}" method="POST" class="message-form">
+    {{CHANNEL_LIST_LINK}}
+    <input type="text" name="message" size="10" value="{{MESSAGE_VALUE}}" class="message-input" autocomplete="off">
+    <input type="submit" value="送信" class="submit-button">
+  </form>
+</div>
+</body></html>

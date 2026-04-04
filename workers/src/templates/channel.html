@@ -4,35 +4,10 @@
 <meta name="viewport" content="width=device-width, user-scalable=no">
 <title>IRC: {{CHANNEL}}/Topic: {{TOPIC}}</title>
 <style>{{CSS}}</style>
-<script>
-window.onload = function() {
-  if (sessionStorage.getItem('justPosted') === 'true') {
-    sessionStorage.removeItem('justPosted');
-    location.replace(location.pathname);
-  }
-};
-window.addEventListener('load', function () {
-  setInterval(function () {
-    var el = document.querySelector('.message-input');
-    if (el && el.value.trim() === '' && document.activeElement !== el) {
-      location.reload();
-    }
-  }, 30000);
-});
-</script>
 </head>
-<body>
-<div style="margin:5px;{{CONTENT_PADDING}}">
-  <div class="input-bar {{INPUT_BAR_POSITION}}">
-    <form action="{{ACTION_URL}}" method="POST" class="message-form">
-      {{CHANNEL_LIST_LINK}}
-      <input type="text" name="message" size="10" class="message-input" autocomplete="off">
-      <input type="submit" value="送信" class="submit-button" onclick="sessionStorage.setItem('justPosted','true');">
-      {{RELOAD_BUTTON}}
-    </form>
-  </div>
-
-{{MESSAGES}}
+<body class="channel-shell-page">
+{{LOGOUT_FORM}}
+<div class="channel-shell">
+{{FRAME_CONTENT}}
 </div>
-
 </body></html>

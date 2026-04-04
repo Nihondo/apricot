@@ -6,7 +6,13 @@ vi.mock("cloudflare:sockets", () => ({
 vi.mock("../templates/admin-style.css", () => ({ default: "ADMIN_CSS" }));
 vi.mock("../templates/style.css", () => ({ default: "" }));
 vi.mock("../templates/channel.html", () => ({
-  default: "<html><head><style>{{CSS}}</style></head><body>{{LOGOUT_FORM}}<div style=\"{{CONTENT_PADDING}}\">{{INPUT_BAR_POSITION}}{{RELOAD_BUTTON}}<h1>{{CHANNEL}}</h1><div>{{TOPIC}}</div>{{MESSAGES}}</div></body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{LOGOUT_FORM}}<div class=\"shell\">{{FRAME_CONTENT}}</div></body></html>",
+}));
+vi.mock("../templates/channel-messages.html", () => ({
+  default: "<html><head><style>{{CSS}}</style><script>{{AUTO_SCROLL_SCRIPT}}</script></head><body>{{TOPIC_BLOCK}}{{MESSAGES}}{{RELOAD_BUTTON}}</body></html>",
+}));
+vi.mock("../templates/channel-composer.html", () => ({
+  default: "<html><head><style>{{CSS}}</style><script>{{ON_LOAD_SCRIPT}}</script></head><body>{{FLASH_MESSAGE}}<form action=\"{{ACTION_URL}}\" method=\"POST\">{{CHANNEL_LIST_LINK}}<input name=\"message\" value=\"{{MESSAGE_VALUE}}\"><button>送信</button></form></body></html>",
 }));
 vi.mock("../templates/channel-list.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{FLASH_MESSAGE}}{{NICK_FORM}}{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</body></html>",
@@ -99,7 +105,7 @@ describe("IrcProxyDO web log persistence", () => {
     expect(response.status).toBe(200);
   });
 
-  it("hydrates persisted logs into the restored web page", async () => {
+  it("hydrates persisted logs into the restored web messages page", async () => {
     const state = new FakeState();
     state.storage.seed(webLogsStorageKey, {
       "#general": [
@@ -113,12 +119,30 @@ describe("IrcProxyDO web log persistence", () => {
     );
     await state.initPromise;
 
-    const response = await proxy.fetch(new Request("https://example.com/web/%23general", {
+    const response = await proxy.fetch(new Request("https://example.com/web/%23general/messages", {
       headers: { "X-Proxy-Prefix": "/proxy/main" },
     }));
     const html = await response.text();
 
     expect(html).toContain("restored line");
+  });
+
+  it("renders the channel shell page with messages and composer iframes", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const response = await proxy.fetch(new Request("https://example.com/web/%23general", {
+      headers: { "X-Proxy-Prefix": "/proxy/main" },
+    }));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain('/proxy/main/web/%23general/composer');
+    expect(html).toContain('/proxy/main/web/%23general/messages');
   });
 
   it("does not add stored-only channels to the channel list until rejoined", async () => {
@@ -371,7 +395,7 @@ describe("IrcProxyDO web log persistence", () => {
     expect(html).toContain('value="#FFFFFF"');
   });
 
-  it("persists web UI settings and applies them across list, channel, and login pages", async () => {
+  it("persists web UI settings and applies them across list, shell, messages, composer, and login pages", async () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
@@ -462,12 +486,34 @@ describe("IrcProxyDO web log persistence", () => {
       },
     }));
     const channelHtml = await channelPage.text();
-    expect(channelHtml).toContain("padding-bottom:45px;");
-    expect(channelHtml).not.toContain("再読込");
+    expect(channelHtml).toContain('/proxy/main/web/%23general/messages');
+    expect(channelHtml).toContain('/proxy/main/web/%23general/composer');
     expect(channelHtml).toContain("body { color: blue; }");
-    expect(channelHtml).not.toContain("設定");
     expect(channelHtml).toContain("--border-color: #654321;");
     expect(channelHtml).toContain("--link-bg: rgba(15,15,15,0.2);");
+
+    const messagesPage = await proxy.fetch(new Request("https://example.com/web/%23general/messages", {
+      headers: {
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+    }));
+    const messagesHtml = await messagesPage.text();
+    expect(messagesHtml).toContain("hello");
+    expect(messagesHtml).toContain("scrollHeight");
+    expect(messagesHtml).not.toContain("再読込");
+    expect(messagesHtml).toContain("body { color: blue; }");
+
+    const composerPage = await proxy.fetch(new Request("https://example.com/web/%23general/composer", {
+      headers: {
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+    }));
+    const composerHtml = await composerPage.text();
+    expect(composerHtml).toContain('action="/proxy/main/web/%23general/composer"');
+    expect(composerHtml).toContain('href="/proxy/main/web/"');
+    expect(composerHtml).toContain("body { color: blue; }");
 
     const loginPage = await proxy.fetch(new Request("https://example.com/web/login", {
       headers: { "X-Proxy-Prefix": "/proxy/main" },
@@ -541,7 +587,7 @@ describe("IrcProxyDO web log persistence", () => {
     expect(response.status).toBe(404);
   });
 
-  it("requires the auth cookie for posting from the web UI", async () => {
+  it("requires the auth cookie for posting from the web composer route", async () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
@@ -554,7 +600,7 @@ describe("IrcProxyDO web log persistence", () => {
       send: vi.fn(),
     };
 
-    const blockedResponse = await proxy.fetch(new Request("https://example.com/web/%23general", {
+    const blockedResponse = await proxy.fetch(new Request("https://example.com/web/%23general/composer", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -575,7 +621,7 @@ describe("IrcProxyDO web log persistence", () => {
     }));
     const cookieHeader = loginResponse.headers.get("Set-Cookie")?.split(";")[0] ?? "";
 
-    const allowedResponse = await proxy.fetch(new Request("https://example.com/web/%23general", {
+    const allowedResponse = await proxy.fetch(new Request("https://example.com/web/%23general/composer", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
@@ -585,9 +631,61 @@ describe("IrcProxyDO web log persistence", () => {
       body: "message=hello",
     }));
 
-    expect(allowedResponse.status).toBe(302);
-    expect(allowedResponse.headers.get("Location")).toBe("/proxy/main/web/%23general");
+    expect(allowedResponse.status).toBe(200);
+    expect(await allowedResponse.text()).toContain("channel-messages-frame");
     expect((proxy as any).serverConn.send).toHaveBeenCalledWith({
+      command: "PRIVMSG",
+      params: ["#general", "hello"],
+    });
+  });
+
+  it("renders the web messages and composer routes and records self messages on composer post", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: undefined })
+    );
+    await state.initPromise;
+
+    const send = vi.fn().mockResolvedValue(undefined);
+    (proxy as any).serverConn = {
+      connected: true,
+      send,
+    };
+    (proxy as any).nick = "apricot";
+
+    const composerResponse = await proxy.fetch(new Request("https://example.com/web/%23general/composer", {
+      headers: { "X-Proxy-Prefix": "/proxy/main" },
+    }));
+    expect(composerResponse.status).toBe(200);
+    expect(await composerResponse.text()).toContain('action="/proxy/main/web/%23general/composer"');
+
+    const postResponse = await proxy.fetch(new Request("https://example.com/web/%23general/composer", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "message=hello",
+    }));
+    const postHtml = await postResponse.text();
+    expect(postResponse.status).toBe(200);
+    expect(postHtml).toContain("channel-messages-frame");
+
+    const messagesResponse = await proxy.fetch(new Request("https://example.com/web/%23general/messages", {
+      headers: { "X-Proxy-Prefix": "/proxy/main" },
+    }));
+    const messagesHtml = await messagesResponse.text();
+    expect(messagesResponse.status).toBe(200);
+    expect(messagesHtml).toContain("hello");
+
+    const logs = state.storage.read<PersistedWebLogs>(webLogsStorageKey);
+    expect(logs?.["#general"]?.at(-1)).toMatchObject({
+      type: "self",
+      nick: "apricot",
+      text: "hello",
+    });
+    expect(send).toHaveBeenCalledWith({
       command: "PRIVMSG",
       params: ["#general", "hello"],
     });

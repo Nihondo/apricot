@@ -15,7 +15,9 @@ import { defineModule } from "../module-system";
 import { extractNick, isChannel } from "../irc-parser";
 import CSS from "../templates/style.css";
 import ADMIN_CSS from "../templates/admin-style.css";
-import CHANNEL_TEMPLATE from "../templates/channel.html";
+import CHANNEL_SHELL_TEMPLATE from "../templates/channel.html";
+import CHANNEL_MESSAGES_TEMPLATE from "../templates/channel-messages.html";
+import CHANNEL_COMPOSER_TEMPLATE from "../templates/channel-composer.html";
 import CHANNEL_LIST_TEMPLATE from "../templates/channel-list.html";
 import SETTINGS_TEMPLATE from "../templates/settings.html";
 
@@ -147,6 +149,12 @@ function buildLinkBackgroundColor(accentColor: string): string {
 function renderSettingsError(errorMessage: string): string {
   return errorMessage
     ? `<div class="admin-message admin-message--danger" role="alert"><strong>設定を保存できませんでした。</strong><span>${escapeHtml(errorMessage)}</span></div>`
+    : "";
+}
+
+function renderFlashMessage(message: string, tone: "info" | "danger"): string {
+  return message
+    ? `<div class="admin-message admin-message--${tone}" role="alert"><span>${escapeHtml(message)}</span></div>`
     : "";
 }
 
@@ -341,16 +349,13 @@ export function buildChannelListPage(
   flashMessage = "",
   flashTone: "info" | "danger" = "info",
 ): string {
-  const flashHtml = flashMessage
-    ? `<div class="admin-message admin-message--${flashTone}"><span>${escapeHtml(flashMessage)}</span></div>`
-    : "";
+  const flashHtml = renderFlashMessage(flashMessage, flashTone);
   const nickForm = `
 <form action="${basePath}/nick" method="POST" class="admin-inline-form">
   <label class="admin-field">
-    <span class="admin-field__label">NICK変更</span>
     <input type="text" name="nick" value="${escapeHtml(nick)}" class="admin-input" autocomplete="nickname">
   </label>
-  <button type="submit" class="admin-button admin-button--subtle">変更</button>
+  <button type="submit" class="admin-button admin-button--subtle">NICK変更</button>
 </form>`;
   const joinForm = `
 <form action="${basePath}/join" method="POST" class="admin-inline-form">
@@ -593,6 +598,34 @@ export function createWebModule(
     showLogout = false,
     webUiSettings: WebUiSettings = DEFAULT_WEB_UI_SETTINGS
   ): string {
+    const channelBasePath = `${basePath}/${encodeURIComponent(channel)}`;
+    const messagesUrl = `${channelBasePath}/messages`;
+    const composerUrl = `${channelBasePath}/composer`;
+    const messagesFrameHtml = `<iframe id="channel-messages-frame" class="channel-frame channel-frame--messages" src="${messagesUrl}" title="${escapeHtml(channel)} messages"></iframe>`;
+    const composerFrameHtml = `<iframe id="channel-composer-frame" class="channel-frame channel-frame--composer" src="${composerUrl}" title="${escapeHtml(channel)} composer"></iframe>`;
+    const frameContent = webUiSettings.displayOrder === "asc"
+      ? `${messagesFrameHtml}\n${composerFrameHtml}`
+      : `${composerFrameHtml}\n${messagesFrameHtml}`;
+
+    return CHANNEL_SHELL_TEMPLATE
+      .replace("{{CSS}}", buildChannelCss(webUiSettings))
+      .replace("{{CHANNEL}}", escapeHtml(channel))
+      .replace("{{TOPIC}}", escapeHtml(topic))
+      .replace(
+        "{{LOGOUT_FORM}}",
+        showLogout
+          ? `<div class="web-auth-bar">${renderLogoutForm(basePath)}</div>`
+          : ""
+      )
+      .replace("{{FRAME_CONTENT}}", frameContent);
+  }
+
+  function buildChannelMessagesPage(
+    channel: string,
+    topic: string,
+    selfNick: string,
+    webUiSettings: WebUiSettings = DEFAULT_WEB_UI_SETTINGS
+  ): string {
     const buf = getBuffer(channel);
     const ordered = webUiSettings.displayOrder === "asc" ? [...buf] : [...buf].reverse();
     const lines = ordered
@@ -601,31 +634,53 @@ export function createWebModule(
         return `<div class="${cls}">${renderMessage(msg, selfNick, timezoneOffset)}</div>`;
       })
       .join("\n");
-
-    const actionUrl = `${basePath}/${encodeURIComponent(channel)}`;
-    const channelListLink = `<a href="${basePath}/" class="channel-list-link" aria-label="チャンネル一覧へ戻る" title="チャンネル一覧へ戻る">一覧</a>`;
-    const inputBarPosition = webUiSettings.displayOrder === "asc" ? "bottom" : "top";
     const reloadButton = webUiSettings.displayOrder === "desc"
       ? '<button type="button" class="floating" onclick="location.reload();">再読込</button>'
       : "";
-    const contentPadding = webUiSettings.displayOrder === "asc" ? "padding-bottom:45px;" : "padding-top:45px;";
+    const topicBlock = topic
+      ? `<div class="topic">${escapeHtml(topic)}</div>`
+      : "";
+    const autoScrollScript = webUiSettings.displayOrder === "asc"
+      ? "var root = document.scrollingElement || document.documentElement; window.scrollTo(0, root.scrollHeight);"
+      : "";
 
-    return CHANNEL_TEMPLATE
+    return CHANNEL_MESSAGES_TEMPLATE
       .replace("{{CSS}}", buildChannelCss(webUiSettings))
-      .replace(
-        "{{LOGOUT_FORM}}",
-        showLogout
-          ? `<div class="web-auth-bar">${renderLogoutForm(basePath)}</div>`
-          : ""
-      )
       .replace("{{CHANNEL}}", escapeHtml(channel))
       .replace("{{TOPIC}}", escapeHtml(topic))
+      .replace("{{TOPIC_BLOCK}}", topicBlock)
+      .replace("{{RELOAD_BUTTON}}", reloadButton)
+      .replace("{{AUTO_SCROLL_SCRIPT}}", autoScrollScript)
+      .replace("{{MESSAGES}}", lines);
+  }
+
+  function buildChannelComposerPage(
+    channel: string,
+    basePath: string,
+    messageValue = "",
+    flashMessage = "",
+    flashTone: "info" | "danger" = "info",
+    webUiSettings: WebUiSettings = DEFAULT_WEB_UI_SETTINGS,
+    shouldReloadMessages = false
+  ): string {
+    const actionUrl = `${basePath}/${encodeURIComponent(channel)}/composer`;
+    const channelListLink = `<a href="${basePath}/" class="channel-list-link" aria-label="チャンネル一覧へ戻る" title="チャンネル一覧へ戻る">一覧</a>`;
+    const flashHtml = renderFlashMessage(flashMessage, flashTone);
+    const onLoadScript = shouldReloadMessages
+      ? `var frame = window.parent && window.parent.document.getElementById("channel-messages-frame");
+if (frame && frame.contentWindow) {
+  frame.contentWindow.location.reload();
+}`
+      : "";
+
+    return CHANNEL_COMPOSER_TEMPLATE
+      .replace("{{CSS}}", buildChannelCss(webUiSettings))
+      .replace("{{CHANNEL}}", escapeHtml(channel))
       .replace("{{ACTION_URL}}", actionUrl)
       .replace("{{CHANNEL_LIST_LINK}}", channelListLink)
-      .replace("{{INPUT_BAR_POSITION}}", inputBarPosition)
-      .replace("{{RELOAD_BUTTON}}", reloadButton)
-      .replace("{{CONTENT_PADDING}}", contentPadding)
-      .replace("{{MESSAGES}}", lines);
+      .replace("{{FLASH_MESSAGE}}", flashHtml)
+      .replace("{{MESSAGE_VALUE}}", escapeHtml(messageValue))
+      .replace("{{ON_LOAD_SCRIPT}}", onLoadScript);
   }
 
   /**
@@ -677,5 +732,15 @@ export function createWebModule(
     return buf ? [...buf] : null;
   }
 
-  return { module, buildChannelPage, recordSelfMessage, getChannelTopic, snapshotLogs, hydrateLogs, getChannelLogs };
+  return {
+    module,
+    buildChannelPage,
+    buildChannelMessagesPage,
+    buildChannelComposerPage,
+    recordSelfMessage,
+    getChannelTopic,
+    snapshotLogs,
+    hydrateLogs,
+    getChannelLogs,
+  };
 }

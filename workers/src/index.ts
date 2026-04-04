@@ -6,9 +6,11 @@
  *   GET  /proxy/:id/ws      — WebSocket endpoint for IRC clients
  *   GET  /proxy/:id/api/status — Get proxy status
  *   GET  /proxy/:id/web/    — Web chat interface (channel list)
- *   GET  /proxy/:id/web/:ch — Web chat interface (channel view)
+ *   GET  /proxy/:id/web/:ch — Web chat shell
+ *   GET  /proxy/:id/web/:ch/messages — Web chat message pane
+ *   GET  /proxy/:id/web/:ch/composer — Web chat composer pane
  *   GET  /proxy/:id/web/login — Web UI login form
- *   POST /proxy/:id/web/:ch — Send message via web interface
+ *   POST /proxy/:id/web/:ch/composer — Send message via web interface
  *   POST /proxy/:id/web/login — Web UI login
  *   POST /proxy/:id/web/logout — Web UI logout
  *   POST /proxy/:id/api/join — Join a channel (Bearer auth)

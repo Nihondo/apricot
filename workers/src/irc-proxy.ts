@@ -306,56 +306,35 @@ export class IrcProxyDO implements DurableObject {
       });
     }
 
-    // GET/POST /web/:channel
-    const webMatch = url.pathname.match(/^\/web\/(.+)$/);
-    if (webMatch) {
-      const channel = decodeURIComponent(webMatch[1]);
-
-      // POST — send message
-      if (request.method === "POST") {
-        const formData = await request.formData();
-        const message = formData.get("message") as string | null;
-
-        if (message && message.trim() && this.serverConn?.connected) {
-          const text = message.trim();
-
-          await this.serverConn.send({
-            command: "PRIVMSG",
-            params: [channel, text],
-          });
-
-          await this.web.recordSelfMessage(channel, this.nick, text);
-
-          this.broadcast({
-            prefix: `${this.nick}!proxy@apricot`,
-            command: "PRIVMSG",
-            params: [channel, text],
-          });
-        }
-
-        // PRG: redirect back to channel page using the browser-visible URL
-        return new Response(null, {
-          status: 302,
-          headers: { Location: `${webBase}/${encodeURIComponent(channel)}` },
-        });
+    const webMessagesMatch = url.pathname.match(/^\/web\/(.+)\/messages\/?$/);
+    if (webMessagesMatch) {
+      if (request.method !== "GET") {
+        return new Response("Method Not Allowed", { status: 405 });
       }
-
-      // GET — show channel messages
-      const topic =
-        this.channelStates.get(channel.toLowerCase())?.topic ||
-        this.web.getChannelTopic(channel);
-
-      const html = this.web.buildChannelPage(
-        channel,
-        topic,
-        this.nick,
-        webBase,
-        Boolean(this.config?.password),
-        this.webUiSettings
+      return this.renderWebChannelMessagesPage(
+        decodeURIComponent(webMessagesMatch[1])
       );
-      return new Response(html, {
-        headers: { "Content-Type": "text/html; charset=utf-8" },
-      });
+    }
+
+    const webComposerMatch = url.pathname.match(/^\/web\/(.+)\/composer\/?$/);
+    if (webComposerMatch) {
+      const channel = decodeURIComponent(webComposerMatch[1]);
+      if (request.method === "GET") {
+        return this.renderWebChannelComposerPage(channel, webBase);
+      }
+      if (request.method === "POST") {
+        return this.handleWebChannelComposer(request, channel, webBase);
+      }
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+
+    // GET /web/:channel
+    const webMatch = url.pathname.match(/^\/web\/(.+)\/?$/);
+    if (webMatch) {
+      if (request.method !== "GET") {
+        return new Response("Method Not Allowed", { status: 405 });
+      }
+      return this.renderWebChannelShellPage(decodeURIComponent(webMatch[1]), webBase);
     }
 
     return new Response("Not found", { status: 404 });
@@ -550,20 +529,18 @@ export class IrcProxyDO implements DurableObject {
       );
     }
 
-    await this.serverConn.send({
-      command: "PRIVMSG",
-      params: [channel, text],
-    });
+    const postResult = await this.postChannelMessage(channel, text);
+    if (!postResult.ok) {
+      return Response.json(
+        { error: postResult.error },
+        { status: postResult.status, headers: corsHeaders() }
+      );
+    }
 
-    await this.web.recordSelfMessage(channel, this.nick, text);
-
-    this.broadcast({
-      prefix: `${this.nick}!proxy@apricot`,
-      command: "PRIVMSG",
-      params: [channel, text],
-    });
-
-    return Response.json({ ok: true, message: text, channel }, { headers: corsHeaders() });
+    return Response.json(
+      { ok: true, message: postResult.message, channel: postResult.channel },
+      { headers: corsHeaders() }
+    );
   }
 
   private async handleApiNick(request: Request): Promise<Response> {
@@ -715,6 +692,129 @@ export class IrcProxyDO implements DurableObject {
   }
 
   // --- Private methods ---
+
+  private getChannelTopic(channel: string): string {
+    return this.channelStates.get(channel.toLowerCase())?.topic || this.web.getChannelTopic(channel);
+  }
+
+  private renderWebChannelShellPage(channel: string, webBase: string): Response {
+    const html = this.web.buildChannelPage(
+      channel,
+      this.getChannelTopic(channel),
+      this.nick,
+      webBase,
+      Boolean(this.config?.password),
+      this.webUiSettings
+    );
+    return new Response(html, {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
+  private renderWebChannelMessagesPage(channel: string): Response {
+    const html = this.web.buildChannelMessagesPage(
+      channel,
+      this.getChannelTopic(channel),
+      this.nick,
+      this.webUiSettings
+    );
+    return new Response(html, {
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
+  private renderWebChannelComposerPage(
+    channel: string,
+    webBase: string,
+    messageValue = "",
+    flashMessage = "",
+    flashTone: "info" | "danger" = "info",
+    status = 200,
+    shouldReloadMessages = false
+  ): Response {
+    const html = this.web.buildChannelComposerPage(
+      channel,
+      webBase,
+      messageValue,
+      flashMessage,
+      flashTone,
+      this.webUiSettings,
+      shouldReloadMessages
+    );
+    return new Response(html, {
+      status,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
+  private async handleWebChannelComposer(
+    request: Request,
+    channel: string,
+    webBase: string
+  ): Promise<Response> {
+    const formData = await request.formData();
+    const messageValue = (formData.get("message") as string | null) ?? "";
+    const postResult = await this.postChannelMessage(channel, messageValue);
+
+    if (!postResult.ok) {
+      return this.renderWebChannelComposerPage(
+        channel,
+        webBase,
+        messageValue,
+        `送信に失敗しました: ${postResult.error}`,
+        "danger",
+        postResult.status,
+        false
+      );
+    }
+
+    return this.renderWebChannelComposerPage(
+      channel,
+      webBase,
+      "",
+      "",
+      "info",
+      200,
+      true
+    );
+  }
+
+  private async postChannelMessage(
+    channel: string | undefined,
+    message: string | undefined
+  ): Promise<
+    | { ok: true; message: string; channel: string }
+    | { ok: false; error: string; status: number }
+  > {
+    const targetChannel = channel?.trim() ?? "";
+    if (!targetChannel) {
+      return { ok: false, error: "missing channel", status: 400 };
+    }
+
+    const trimmedMessage = message?.trim() ?? "";
+    if (!trimmedMessage) {
+      return { ok: false, error: "missing message", status: 400 };
+    }
+
+    if (!this.serverConn?.connected) {
+      return { ok: false, error: "not connected to IRC server", status: 503 };
+    }
+
+    await this.serverConn.send({
+      command: "PRIVMSG",
+      params: [targetChannel, trimmedMessage],
+    });
+
+    await this.web.recordSelfMessage(targetChannel, this.nick, trimmedMessage);
+
+    this.broadcast({
+      prefix: `${this.nick}!proxy@apricot`,
+      command: "PRIVMSG",
+      params: [targetChannel, trimmedMessage],
+    });
+
+    return { ok: true, message: trimmedMessage, channel: targetChannel };
+  }
 
   private async handleClientRegistration(
     ws: WebSocket,

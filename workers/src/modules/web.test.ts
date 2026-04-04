@@ -4,7 +4,13 @@ import type { ModuleContext } from "../module-system";
 vi.mock("../templates/admin-style.css", () => ({ default: "ADMIN_CSS" }));
 vi.mock("../templates/style.css", () => ({ default: "" }));
 vi.mock("../templates/channel.html", () => ({
-  default: "<html><body>{{INPUT_BAR_POSITION}}{{CHANNEL_LIST_LINK}}{{RELOAD_BUTTON}}{{CONTENT_PADDING}}<h1>{{CHANNEL}}</h1><div>{{TOPIC}}</div><form action=\"{{ACTION_URL}}\"></form>{{MESSAGES}}</body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{LOGOUT_FORM}}<div class=\"shell\">{{FRAME_CONTENT}}</div></body></html>",
+}));
+vi.mock("../templates/channel-messages.html", () => ({
+  default: "<html><head><style>{{CSS}}</style><script>{{AUTO_SCROLL_SCRIPT}}</script></head><body>{{TOPIC_BLOCK}}{{MESSAGES}}{{RELOAD_BUTTON}}</body></html>",
+}));
+vi.mock("../templates/channel-composer.html", () => ({
+  default: "<html><head><style>{{CSS}}</style><script>{{ON_LOAD_SCRIPT}}</script></head><body>{{FLASH_MESSAGE}}<form action=\"{{ACTION_URL}}\">{{CHANNEL_LIST_LINK}}<input name=\"message\" value=\"{{MESSAGE_VALUE}}\"><button>送信</button></form></body></html>",
 }));
 vi.mock("../templates/channel-list.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}<p>{{SERVER_NAME}} に {{NICK}} として参加</p>{{FLASH_MESSAGE}}{{NICK_FORM}}<div>{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</div><span>サーバー: {{SERVER_NAME}}</span><span>NICK: {{NICK}}</span></body></html>",
@@ -86,11 +92,10 @@ describe("createWebModule", () => {
 
     expect(restored.getChannelTopic("#general")).toBe("welcome topic");
 
-    const html = restored.buildChannelPage(
+    const html = restored.buildChannelMessagesPage(
       "#general",
       restored.getChannelTopic("#general"),
       "apricot",
-      "/proxy/main/web"
     );
 
     expect(html).toContain("welcome topic");
@@ -98,21 +103,8 @@ describe("createWebModule", () => {
     expect(html).toContain("alice&gt;");
   });
 
-  it("buildChannelPage desc: messages reversed, input-bar top, reload button present", async () => {
+  it("buildChannelPage desc: composer iframe is placed before messages iframe", async () => {
     const web = createWebModule(new Map(), 0);
-    const ctx = makeContext();
-
-    await web.module.handlers.get("ss_privmsg")?.(ctx, {
-      prefix: "alice!user@host",
-      command: "PRIVMSG",
-      params: ["#general", "first"],
-    });
-    await web.module.handlers.get("ss_privmsg")?.(ctx, {
-      prefix: "alice!user@host",
-      command: "PRIVMSG",
-      params: ["#general", "second"],
-    });
-
     const html = web.buildChannelPage(
       "#general",
       "",
@@ -121,17 +113,31 @@ describe("createWebModule", () => {
       false,
       buildWebUiSettings({ displayOrder: "desc" })
     );
-    const firstIdx = html.indexOf("first");
-    const secondIdx = html.indexOf("second");
-    expect(secondIdx).toBeLessThan(firstIdx); // 新しい順（secondが上）
-    expect(html).toContain("top");
-    expect(html).toContain('href="/proxy/main/web/"');
-    expect(html).toContain("一覧");
-    expect(html).toContain("再読込");
-    expect(html).toContain("padding-top:45px;");
+
+    const messagesFrameIndex = html.indexOf("channel-messages-frame");
+    const composerFrameIndex = html.indexOf("channel-composer-frame");
+    expect(composerFrameIndex).toBeLessThan(messagesFrameIndex);
+    expect(html).toContain('src="/proxy/main/web/%23general/messages"');
+    expect(html).toContain('src="/proxy/main/web/%23general/composer"');
   });
 
-  it("buildChannelPage asc: messages chronological, input-bar bottom, no reload button", async () => {
+  it("buildChannelPage asc: messages iframe is placed before composer iframe", async () => {
+    const web = createWebModule(new Map(), 0);
+    const html = web.buildChannelPage(
+      "#general",
+      "",
+      "apricot",
+      "/proxy/main/web",
+      false,
+      buildWebUiSettings({ displayOrder: "asc" })
+    );
+
+    const messagesFrameIndex = html.indexOf("channel-messages-frame");
+    const composerFrameIndex = html.indexOf("channel-composer-frame");
+    expect(messagesFrameIndex).toBeLessThan(composerFrameIndex);
+  });
+
+  it("buildChannelMessagesPage asc: messages stay chronological and auto-scrolls to bottom", async () => {
     const web = createWebModule(new Map(), 0);
     const ctx = makeContext();
 
@@ -146,22 +152,66 @@ describe("createWebModule", () => {
       params: ["#general", "second"],
     });
 
-    const html = web.buildChannelPage(
+    const html = web.buildChannelMessagesPage(
       "#general",
       "",
       "apricot",
-      "/proxy/main/web",
-      false,
       buildWebUiSettings({ displayOrder: "asc" })
     );
     const firstIdx = html.indexOf("first");
     const secondIdx = html.indexOf("second");
     expect(firstIdx).toBeLessThan(secondIdx); // 古い順（firstが上）
-    expect(html).toContain("bottom");
+    expect(html).not.toContain("再読込");
+    expect(html).toContain("scrollHeight");
+  });
+
+  it("buildChannelMessagesPage desc: messages are reversed and show the reload button", async () => {
+    const web = createWebModule(new Map(), 0);
+    const ctx = makeContext();
+
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "first"],
+    });
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "second"],
+    });
+
+    const html = web.buildChannelMessagesPage(
+      "#general",
+      "",
+      "apricot",
+      buildWebUiSettings({ displayOrder: "desc" })
+    );
+    const firstIdx = html.indexOf("first");
+    const secondIdx = html.indexOf("second");
+    expect(secondIdx).toBeLessThan(firstIdx); // 新しい順（secondが上）
+    expect(html).toContain("再読込");
+    expect(html).not.toContain("scrollHeight");
+  });
+
+  it("buildChannelComposerPage includes the list link and reloads messages after submit", () => {
+    const web = createWebModule(new Map(), 0);
+    const html = web.buildChannelComposerPage(
+      "#general",
+      "/proxy/main/web",
+      "draft",
+      "送信失敗",
+      "danger",
+      buildWebUiSettings(),
+      true
+    );
+
+    expect(html).toContain('action="/proxy/main/web/%23general/composer"');
     expect(html).toContain('href="/proxy/main/web/"');
     expect(html).toContain("一覧");
-    expect(html).not.toContain("再読込");
-    expect(html).toContain("padding-bottom:45px;");
+    expect(html).toContain('value="draft"');
+    expect(html).toContain("送信失敗");
+    expect(html).toContain("channel-messages-frame");
+    expect(html).toContain("location.reload()");
   });
 
   it("trims restored logs to the latest 200 messages", () => {
