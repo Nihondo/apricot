@@ -200,7 +200,7 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/post \
   -d '{"channel": "#general", "url": "https://example.com/article"}'
 ```
 
-- **Twitter/X URL**: oEmbed API でツイート本文と著者名を取得
+- **Twitter/X URL**: oEmbed API で投稿本文と著者名を取得し、Web UI では画像がなくてもテキストカードとしてプレビュー
 - **一般 URL**: HTML の `<title>` タグを取得（最初の 32KB のみ読み込み）
 - フォールバック: URL をそのまま投稿
 
@@ -208,8 +208,9 @@ Web UI の URL プレビュー優先順位:
 
 1. 画像直リンクならそのままインライン画像として扱う
 2. YouTube URL ならサムネイル画像を生成する
-3. それ以外は `og:image` → `twitter:image` → JSON oEmbed の順で画像を探す
-4. 画像が見つからなければプレビューは表示しない
+3. Twitter/X URL は oEmbed からテキストカードを生成する
+4. それ以外は `og:image` → `twitter:image` → JSON oEmbed の順で画像を探す
+5. 画像もテキストカードも生成できなければプレビューは表示しない
 
 リクエストボディ:
 
@@ -267,7 +268,7 @@ curl http://localhost:8787/proxy/myproxy/api/logs/%23general
 | `type` | string | `privmsg` / `notice` / `join` / `part` / `quit` / `kick` / `nick` / `topic` / `mode` / `self` |
 | `nick` | string | 発言者 nick |
 | `text` | string | メッセージ本文（`nick` / `topic` 等では対象または新しい値） |
-| `embed` | object? | Web UI 用の URL プレビュー情報。`kind`, `sourceUrl`, `imageUrl`, `title?`, `siteName?` を含む |
+| `embed` | object? | Web UI 用の URL プレビュー情報。`kind`, `sourceUrl`, `imageUrl?`, `title?`, `siteName?`, `description?` を含む |
 
 最大 200 件（時系列順）を返します。指定チャンネルのバッファが存在しない場合は `404` を返します。
 

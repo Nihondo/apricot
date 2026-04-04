@@ -8,13 +8,19 @@ const FETCH_TIMEOUT_MS = 10_000;
 const MAX_HTML_BYTES = 32 * 1024;
 const URL_RE = /(https?:\/\/[^\s<>"]+)/g;
 const IMAGE_EXTENSIONS = new Set(["png", "jpg", "jpeg", "gif", "webp", "avif"]);
+const X_URL_RE = /^https?:\/\/(?:www\.)?(x|twitter)\.com\//i;
+const X_OEMBED_ENDPOINTS = [
+  "https://publish.x.com/oembed",
+  "https://publish.twitter.com/oembed",
+];
 
 export interface ResolvedUrlEmbed {
   kind: "image" | "card";
   sourceUrl: string;
-  imageUrl: string;
+  imageUrl?: string;
   title?: string;
   siteName?: string;
+  description?: string;
 }
 
 interface OEmbedPayload {
@@ -23,6 +29,8 @@ interface OEmbedPayload {
   thumbnail_url?: string;
   url?: string;
   type?: string;
+  author_name?: string;
+  html?: string;
 }
 
 interface HtmlMetadata {
@@ -39,7 +47,7 @@ interface HtmlMetadata {
  */
 export async function extractUrlMetadata(url: string): Promise<string> {
   try {
-    if (/^https?:\/\/(x|twitter)\.com\//i.test(url)) {
+    if (X_URL_RE.test(url)) {
       return await extractTwitterMetadata(url);
     }
     return await extractPageTitle(url);
@@ -77,6 +85,11 @@ export async function resolveUrlEmbed(url: string): Promise<ResolvedUrlEmbed | u
       return youtubeEmbed;
     }
 
+    const xEmbed = await resolveXEmbed(url);
+    if (xEmbed) {
+      return xEmbed;
+    }
+
     return await resolveHtmlEmbed(url);
   } catch {
     return undefined;
@@ -84,22 +97,11 @@ export async function resolveUrlEmbed(url: string): Promise<ResolvedUrlEmbed | u
 }
 
 async function extractTwitterMetadata(url: string): Promise<string> {
-  const oembedUrl = `https://publish.twitter.com/oembed?url=${encodeURIComponent(url)}&omit_script=true`;
-
-  const resp = await fetch(oembedUrl, {
-    headers: { "User-Agent": "apricot-irc-proxy/0.1" },
-    signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-  });
-
-  if (!resp.ok) {
+  const data = await fetchXOEmbedPayload(url);
+  if (!data) {
     // Fall back to generic title extraction
     return extractPageTitle(url);
   }
-
-  const data = (await resp.json()) as {
-    author_name?: string;
-    html?: string;
-  };
 
   const authorName = cleanMetadataText(data.author_name) || "";
   const text = normalizeTwitterOEmbedText(data.html);
@@ -143,6 +145,31 @@ function resolveDirectImageEmbed(url: string): ResolvedUrlEmbed | undefined {
     kind: "image",
     sourceUrl: url,
     imageUrl: url,
+  };
+}
+
+async function resolveXEmbed(url: string): Promise<ResolvedUrlEmbed | undefined> {
+  if (!X_URL_RE.test(url)) {
+    return undefined;
+  }
+
+  const data = await fetchXOEmbedPayload(url);
+  if (!data) {
+    return undefined;
+  }
+
+  const authorName = cleanMetadataText(data.author_name);
+  const description = normalizeTwitterOEmbedText(data.html) || undefined;
+  if (!authorName && !description) {
+    return undefined;
+  }
+
+  return {
+    kind: "card",
+    sourceUrl: url,
+    siteName: "X",
+    title: authorName ? `Xユーザーの${authorName}さん` : "Xの投稿",
+    description,
   };
 }
 
@@ -195,6 +222,8 @@ async function resolveHtmlEmbed(url: string): Promise<ResolvedUrlEmbed | undefin
   const title = extractMetaContent(metadata.html, "property", "og:title")
     ?? extractMetaContent(metadata.html, "name", "twitter:title")
     ?? extractTitleFromHtml(metadata.html);
+  const description = extractMetaContent(metadata.html, "property", "og:description")
+    ?? extractMetaContent(metadata.html, "name", "twitter:description");
   const siteName = extractMetaContent(metadata.html, "property", "og:site_name");
 
   if (imageUrl) {
@@ -204,6 +233,7 @@ async function resolveHtmlEmbed(url: string): Promise<ResolvedUrlEmbed | undefin
       imageUrl,
       title: cleanMetadataText(title),
       siteName: cleanMetadataText(siteName),
+      description: cleanMetadataText(description),
     };
   }
 
@@ -228,7 +258,29 @@ async function resolveHtmlEmbed(url: string): Promise<ResolvedUrlEmbed | undefin
     imageUrl: oembedImage,
     title: cleanMetadataText(oembed.title) ?? cleanMetadataText(title),
     siteName: cleanMetadataText(oembed.provider_name) ?? cleanMetadataText(siteName),
+    description: cleanMetadataText(description),
   };
+}
+
+async function fetchXOEmbedPayload(url: string): Promise<OEmbedPayload | undefined> {
+  for (const endpoint of X_OEMBED_ENDPOINTS) {
+    const oembedUrl = `${endpoint}?url=${encodeURIComponent(url)}&omit_script=true`;
+
+    try {
+      const resp = await fetch(oembedUrl, {
+        headers: { "User-Agent": "apricot-irc-proxy/0.1" },
+        signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+      });
+      if (!resp.ok) {
+        continue;
+      }
+      return await resp.json() as OEmbedPayload;
+    } catch {
+      // Try the legacy endpoint before giving up.
+    }
+  }
+
+  return undefined;
 }
 
 async function fetchHtmlMetadata(url: string): Promise<HtmlMetadata | undefined> {

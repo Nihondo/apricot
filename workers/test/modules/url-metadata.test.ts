@@ -32,7 +32,7 @@ describe("url metadata resolver", () => {
   it("normalizes X oEmbed text before returning metadata", async () => {
     fetchMock.mockImplementation(async (input) => {
       const url = String(input);
-      if (url.startsWith("https://publish.twitter.com/oembed")) {
+      if (url.startsWith("https://publish.x.com/oembed")) {
         return Response.json({
           author_name: "We don&#39;t deserve cats 😺",
           html: "<blockquote><p>She adores her only baby.. pic.twitter.com/PlPzyKtKBc&mdash; We don&#39;t deserve cats 😺 (@catsareblessing) April 4, 2026</p></blockquote>",
@@ -48,6 +48,29 @@ describe("url metadata resolver", () => {
     expect(metadata).not.toContain("&amp;#39;");
     expect(metadata).not.toContain("&amp;mdash;");
     expect(metadata).not.toContain("(@catsareblessing)");
+  });
+
+  it("resolves X URLs as text cards when oEmbed returns post text", async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.startsWith("https://publish.x.com/oembed")) {
+        return Response.json({
+          author_name: "We don&#39;t deserve cats 😺",
+          html: "<blockquote><p>She adores her only baby.. pic.twitter.com/PlPzyKtKBc&mdash; We don&#39;t deserve cats 😺 (@catsareblessing) April 4, 2026</p></blockquote>",
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const embed = await resolveUrlEmbed("https://x.com/catsareblessing/status/2040275667414053299");
+
+    expect(embed).toEqual({
+      kind: "card",
+      sourceUrl: "https://x.com/catsareblessing/status/2040275667414053299",
+      siteName: "X",
+      title: "XユーザーのWe don't deserve cats 😺さん",
+      description: "She adores her only baby.. pic.twitter.com/PlPzyKtKBc",
+    });
   });
 
   it("resolves the first embeddable URL from a message", async () => {
@@ -110,6 +133,7 @@ describe("url metadata resolver", () => {
       imageUrl: "https://example.com/images/card.jpg",
       title: "OG Title",
       siteName: "OG Site",
+      description: undefined,
     });
   });
 
@@ -127,6 +151,7 @@ describe("url metadata resolver", () => {
       imageUrl: "https://cdn.example.com/twitter.jpg",
       title: "Twitter Title",
       siteName: undefined,
+      description: undefined,
     });
   });
 
@@ -157,6 +182,7 @@ describe("url metadata resolver", () => {
       imageUrl: "https://cdn.example.com/thumb.jpg",
       title: "Embed Title",
       siteName: "Example Provider",
+      description: undefined,
     });
   });
 

@@ -404,6 +404,36 @@ describe("createWebModule", () => {
     expect(html).not.toContain("url-embed-container");
   });
 
+  it("renders text-only URL embeds for X previews", async () => {
+    resolveMessageEmbedMock.mockResolvedValue({
+      kind: "card",
+      sourceUrl: "https://x.com/example/status/1",
+      siteName: "X",
+      title: "Xユーザーのexampleさん",
+      description: "post body",
+    });
+    const web = createWebModule(new Map(), 0);
+    const ctx = makeContext();
+
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "look https://x.com/example/status/1"],
+    });
+
+    const html = web.buildChannelMessagesPage(
+      "#general",
+      "",
+      "apricot",
+      buildWebUiSettings({ enableInlineUrlPreview: true })
+    );
+
+    expect(html).toContain("url-embed--text-only");
+    expect(html).toContain("Xユーザーのexampleさん");
+    expect(html).toContain("post body");
+    expect(html).not.toContain('src="undefined"');
+  });
+
   it("highlights registered keywords in message text with keyword-hl span", async () => {
     const web = createWebModule(new Map(), 0);
     const ctx = makeContext();

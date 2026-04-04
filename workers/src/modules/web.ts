@@ -294,19 +294,25 @@ function renderEmbedDataAttributes(embed: ResolvedUrlEmbed): string {
   const attrs = [
     `data-preview-kind="${escapeHtml(embed.kind)}"`,
     `data-preview-source-url="${escapeHtml(embed.sourceUrl)}"`,
-    `data-preview-image-url="${escapeHtml(embed.imageUrl)}"`,
   ];
+  if (embed.imageUrl) {
+    attrs.push(`data-preview-image-url="${escapeHtml(embed.imageUrl)}"`);
+  }
   if (embed.title) {
     attrs.push(`data-preview-title="${escapeHtml(embed.title)}"`);
   }
   if (embed.siteName) {
     attrs.push(`data-preview-site-name="${escapeHtml(embed.siteName)}"`);
   }
+  if (embed.description) {
+    attrs.push(`data-preview-description="${escapeHtml(embed.description)}"`);
+  }
   return attrs.join(" ");
 }
 
 function renderUrlEmbed(embed: ResolvedUrlEmbed, variant: "inline" | "popup"): string {
-  const embedClass = variant === "inline" ? "url-embed url-embed--inline" : "url-embed url-embed--popup";
+  const baseClass = variant === "inline" ? "url-embed url-embed--inline" : "url-embed url-embed--popup";
+  const embedClass = embed.imageUrl ? baseClass : `${baseClass} url-embed--text-only`;
   const imageClass = embed.kind === "image" ? "url-embed__image url-embed__image--full" : "url-embed__image";
   const siteNameHtml = embed.siteName
     ? `<span class="url-embed__site">${escapeHtml(embed.siteName)}</span>`
@@ -314,12 +320,18 @@ function renderUrlEmbed(embed: ResolvedUrlEmbed, variant: "inline" | "popup"): s
   const titleHtml = embed.title
     ? `<span class="url-embed__title">${escapeHtml(embed.title)}</span>`
     : "";
-  const metaHtml = siteNameHtml || titleHtml
-    ? `<span class="url-embed__meta">${siteNameHtml}${titleHtml}</span>`
+  const descriptionHtml = embed.description
+    ? `<span class="url-embed__description">${escapeHtml(embed.description)}</span>`
+    : "";
+  const metaHtml = siteNameHtml || titleHtml || descriptionHtml
+    ? `<span class="url-embed__meta">${siteNameHtml}${titleHtml}${descriptionHtml}</span>`
+    : "";
+  const imageHtml = embed.imageUrl
+    ? `<img src="${escapeHtml(embed.imageUrl)}" alt="${embed.title ? escapeHtml(embed.title) : "URL preview"}" class="${imageClass}" loading="lazy">`
     : "";
 
   return `<a href="${escapeHtml(embed.sourceUrl)}" target="_blank" rel="noopener" class="${embedClass}">
-    <img src="${escapeHtml(embed.imageUrl)}" alt="${embed.title ? escapeHtml(embed.title) : "URL preview"}" class="${imageClass}" loading="lazy">
+    ${imageHtml}
     ${metaHtml}
   </a>`;
 }
@@ -327,26 +339,39 @@ function renderUrlEmbed(embed: ResolvedUrlEmbed, variant: "inline" | "popup"): s
 function buildPreviewScript(): string {
   return `var popup = document.getElementById("url-preview-popup");
 if (popup) {
+  var popupEmbed = popup.querySelector("[data-preview-popup-embed]");
   var popupImage = popup.querySelector("[data-preview-popup-image]");
   var popupSite = popup.querySelector("[data-preview-popup-site]");
   var popupTitle = popup.querySelector("[data-preview-popup-title]");
+  var popupDescription = popup.querySelector("[data-preview-popup-description]");
   var hoverCapable = window.matchMedia && window.matchMedia("(hover: hover)").matches;
   var longPressTimer = 0;
   var longPressHandled = false;
   var activeLink = null;
 
   function fillPopup(link) {
-    if (!popupImage || !popupSite || !popupTitle) {
+    if (!popupEmbed || !popupImage || !popupSite || !popupTitle || !popupDescription) {
       return;
     }
-    popupImage.setAttribute("src", link.dataset.previewImageUrl || "");
-    popupImage.setAttribute("alt", link.dataset.previewTitle || "URL preview");
-    popupImage.className = link.dataset.previewKind === "image"
-      ? "url-embed__image url-embed__image--full"
-      : "url-embed__image";
+    var hasPreviewImage = Boolean(link.dataset.previewImageUrl);
+    popupImage.hidden = !hasPreviewImage;
+    if (hasPreviewImage) {
+      popupImage.setAttribute("src", link.dataset.previewImageUrl || "");
+      popupImage.setAttribute("alt", link.dataset.previewTitle || "URL preview");
+      popupImage.className = link.dataset.previewKind === "image"
+        ? "url-embed__image url-embed__image--full"
+        : "url-embed__image";
+    } else {
+      popupImage.removeAttribute("src");
+      popupImage.setAttribute("alt", "URL preview");
+      popupImage.className = "url-embed__image";
+    }
     popupSite.textContent = link.dataset.previewSiteName || "";
     popupTitle.textContent = link.dataset.previewTitle || "";
-    popup.classList.toggle("url-preview-popup--card", link.dataset.previewKind !== "image");
+    popupDescription.textContent = link.dataset.previewDescription || "";
+    popupDescription.hidden = !link.dataset.previewDescription;
+    popupEmbed.classList.toggle("url-embed--text-only", !hasPreviewImage);
+    popup.classList.toggle("url-preview-popup--card", link.dataset.previewKind !== "image" || !hasPreviewImage);
   }
 
   function positionPopup(link) {
@@ -509,8 +534,8 @@ function renderMessage(
   const nickClass = isSelf ? "username-self" : "username-other";
   const canUsePopupPreview = !webUiSettings.enableInlineUrlPreview && Boolean(m.embed);
   const inlineEmbedHtml = webUiSettings.enableInlineUrlPreview && m.embed
-    ? `<div class="url-embed-container">${renderUrlEmbed(m.embed, "inline")}</div>`
-    : "";
+      ? `<div class="url-embed-container">${renderUrlEmbed(m.embed, "inline")}</div>`
+      : "";
 
   switch (m.type) {
     case "privmsg":
@@ -858,11 +883,12 @@ export function createWebModule(
     const popupHtml = webUiSettings.enableInlineUrlPreview
       ? ""
       : `<div id="url-preview-popup" class="url-preview-popup" hidden>
-  <div class="url-embed url-embed--popup">
+  <div data-preview-popup-embed class="url-embed url-embed--popup">
     <img data-preview-popup-image src="" alt="URL preview" class="url-embed__image" loading="lazy">
     <span class="url-embed__meta">
       <span data-preview-popup-site class="url-embed__site"></span>
       <span data-preview-popup-title class="url-embed__title"></span>
+      <span data-preview-popup-description class="url-embed__description"></span>
     </span>
   </div>
 </div>`;
