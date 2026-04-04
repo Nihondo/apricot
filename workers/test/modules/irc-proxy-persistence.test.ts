@@ -17,13 +17,13 @@ vi.mock("../../src/modules/url-metadata", () => ({
 vi.mock("../../src/templates/admin-style.css", () => ({ default: "ADMIN_CSS" }));
 vi.mock("../../src/templates/style.css", () => ({ default: "" }));
 vi.mock("../../src/templates/channel.html", () => ({
-  default: "<html><head><style>{{CSS}}</style></head><body><div class=\"shell\">{{FRAME_CONTENT}}</div></body></html>",
+  default: "<html><head><style>{{CSS}}</style>{{THEME_CSS_LINK}}</head><body><div class=\"shell\">{{FRAME_CONTENT}}</div></body></html>",
 }));
 vi.mock("../../src/templates/channel-messages.html", () => ({
-  default: "<html><head><style>{{CSS}}</style><script>{{AUTO_SCROLL_SCRIPT}}</script></head><body><div id=\"channel-messages-shell\">{{MESSAGES}}</div>{{RELOAD_BUTTON}}</body></html>",
+  default: "<html><head><style>{{CSS}}</style>{{THEME_CSS_LINK}}<script>{{AUTO_SCROLL_SCRIPT}}</script></head><body><div id=\"channel-messages-shell\">{{MESSAGES}}</div>{{RELOAD_BUTTON}}</body></html>",
 }));
 vi.mock("../../src/templates/channel-composer.html", () => ({
-  default: "<html><head><style>{{CSS}}</style><script>{{ON_LOAD_SCRIPT}}</script></head><body>{{FLASH_MESSAGE}}<form action=\"{{ACTION_URL}}\" method=\"POST\">{{CHANNEL_LIST_LINK}}<input name=\"message\" value=\"{{MESSAGE_VALUE}}\"><button>送信</button></form></body></html>",
+  default: "<html><head><style>{{CSS}}</style>{{THEME_CSS_LINK}}<script>{{ON_LOAD_SCRIPT}}</script></head><body>{{FLASH_MESSAGE}}<form action=\"{{ACTION_URL}}\" method=\"POST\">{{CHANNEL_LIST_LINK}}<input name=\"message\" value=\"{{MESSAGE_VALUE}}\"><button>送信</button></form></body></html>",
 }));
 vi.mock("../../src/templates/channel-list.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{FLASH_MESSAGE}}{{NICK_FORM}}{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</body></html>",
@@ -103,6 +103,18 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
   };
 }
 
+async function loginWeb(proxy: IrcProxyDO): Promise<string> {
+  const response = await proxy.fetch(new Request("https://example.com/web/login", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      "X-Proxy-Prefix": "/proxy/main",
+    },
+    body: "password=secret",
+  }));
+  return response.headers.get("Set-Cookie")?.split(";")[0] ?? "";
+}
+
 describe("IrcProxyDO web log persistence", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
@@ -114,7 +126,7 @@ describe("IrcProxyDO web log persistence", () => {
     resolveUrlEmbedMock.mockResolvedValue(undefined);
   });
 
-  it("keeps web UI public when CLIENT_PASSWORD is not configured", async () => {
+  it("returns 503 for web UI when CLIENT_PASSWORD is not configured", async () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
@@ -126,7 +138,7 @@ describe("IrcProxyDO web log persistence", () => {
       headers: { "X-Proxy-Prefix": "/proxy/main" },
     }));
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(503);
   });
 
   it("hydrates persisted logs into the restored web messages page", async () => {
@@ -139,12 +151,13 @@ describe("IrcProxyDO web log persistence", () => {
 
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
-      makeEnv()
+      makeEnv({ CLIENT_PASSWORD: "secret" })
     );
     await state.initPromise;
+    const cookieHeader = await loginWeb(proxy);
 
     const response = await proxy.fetch(new Request("https://example.com/web/%23general/messages", {
-      headers: { "X-Proxy-Prefix": "/proxy/main" },
+      headers: { Cookie: cookieHeader, "X-Proxy-Prefix": "/proxy/main" },
     }));
     const html = await response.text();
 
@@ -155,9 +168,10 @@ describe("IrcProxyDO web log persistence", () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
-      makeEnv({ CLIENT_PASSWORD: undefined })
+      makeEnv({ CLIENT_PASSWORD: "secret" })
     );
     await state.initPromise;
+    const cookieHeader = await loginWeb(proxy);
 
     await (proxy as any).handleServerMessage({
       prefix: "alice!user@host",
@@ -166,7 +180,7 @@ describe("IrcProxyDO web log persistence", () => {
     });
 
     const response = await proxy.fetch(new Request("https://example.com/web/%23general/messages/fragment", {
-      headers: { "X-Proxy-Prefix": "/proxy/main" },
+      headers: { Cookie: cookieHeader, "X-Proxy-Prefix": "/proxy/main" },
     }));
 
     expect(response.status).toBe(200);
@@ -178,12 +192,13 @@ describe("IrcProxyDO web log persistence", () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
-      makeEnv()
+      makeEnv({ CLIENT_PASSWORD: "secret" })
     );
     await state.initPromise;
+    const cookieHeader = await loginWeb(proxy);
 
     const response = await proxy.fetch(new Request("https://example.com/web/%23general", {
-      headers: { "X-Proxy-Prefix": "/proxy/main" },
+      headers: { Cookie: cookieHeader, "X-Proxy-Prefix": "/proxy/main" },
     }));
     const html = await response.text();
 
@@ -202,12 +217,13 @@ describe("IrcProxyDO web log persistence", () => {
 
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
-      makeEnv()
+      makeEnv({ CLIENT_PASSWORD: "secret" })
     );
     await state.initPromise;
+    const cookieHeader = await loginWeb(proxy);
 
     const listBeforeJoin = await proxy.fetch(new Request("https://example.com/web/", {
-      headers: { "X-Proxy-Prefix": "/proxy/main" },
+      headers: { Cookie: cookieHeader, "X-Proxy-Prefix": "/proxy/main" },
     }));
     expect(await listBeforeJoin.text()).not.toContain("#general");
 
@@ -218,7 +234,7 @@ describe("IrcProxyDO web log persistence", () => {
     });
 
     const listAfterJoin = await proxy.fetch(new Request("https://example.com/web/", {
-      headers: { "X-Proxy-Prefix": "/proxy/main" },
+      headers: { Cookie: cookieHeader, "X-Proxy-Prefix": "/proxy/main" },
     }));
     expect(await listAfterJoin.text()).toContain("#general");
   });
@@ -270,7 +286,7 @@ describe("IrcProxyDO web log persistence", () => {
     expect(response.headers.get("Location")).toBe("/proxy/main/web/login");
   });
 
-  it("returns 404 for /web/settings when CLIENT_PASSWORD is not configured", async () => {
+  it("returns 503 for /web/settings when CLIENT_PASSWORD is not configured", async () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
@@ -282,7 +298,7 @@ describe("IrcProxyDO web log persistence", () => {
       headers: { "X-Proxy-Prefix": "/proxy/main" },
     }));
 
-    expect(response.status).toBe(404);
+    expect(response.status).toBe(503);
   });
 
   it("renders login page errors with 401 on wrong password", async () => {
@@ -362,7 +378,7 @@ describe("IrcProxyDO web log persistence", () => {
       mutedTextColor: "#666666",
       keywordColor: "#D84315",
       displayOrder: "asc",
-      extraCss: "body { color: blue; }",
+      extraCss: ".channel-shell { color: blue; }",
       highlightKeywords: "",
       dimKeywords: "",
       enableInlineUrlPreview: true,
@@ -393,7 +409,8 @@ describe("IrcProxyDO web log persistence", () => {
 
     expect(response.status).toBe(200);
     expect(html).toContain("&quot;Fira Sans&quot;, sans-serif");
-    expect(html).toContain("body { color: blue; }");
+    expect(html).toContain(".channel-shell {");
+    expect(html).toContain("color: blue;");
     expect(html).toContain("この設定はチャンネル画面にのみ適用されます。");
     expect(html).toContain("ADMIN_CSS");
     expect(html).not.toContain("font-size: 18px;");
@@ -446,6 +463,7 @@ describe("IrcProxyDO web log persistence", () => {
     expect(html).toContain('value="#0B5FFF"');
     expect(html).toContain('name="buttonTextColor"');
     expect(html).toContain('value="#FFFFFF"');
+    expect(html).not.toContain("body { color: blue; }");
     expect(html).not.toMatch(/name="enableInlineUrlPreview"[^>]*checked/);
   });
 
@@ -492,7 +510,7 @@ describe("IrcProxyDO web log persistence", () => {
         "keywordColor=%23FF4400",
         "displayOrder=asc",
         "enableInlineUrlPreview=1",
-        "extraCss=body%20%7B%20color%3A%20blue%3B%20%7D",
+        "extraCss=.channel-shell%20%7B%20color%3A%20blue%3B%20%7D",
         "highlightKeywords=hello%0Aworld",
         "dimKeywords=NickServ",
       ].join("&"),
@@ -518,7 +536,7 @@ describe("IrcProxyDO web log persistence", () => {
       keywordColor: "#FF4400",
       displayOrder: "asc",
       enableInlineUrlPreview: true,
-      extraCss: "body { color: blue; }",
+      extraCss: ".channel-shell {\n  color: blue;\n}",
       highlightKeywords: "hello\nworld",
       dimKeywords: "NickServ",
     });
@@ -539,7 +557,7 @@ describe("IrcProxyDO web log persistence", () => {
     expect(listHtml).toContain("設定");
     expect(listHtml).toContain("ADMIN_CSS");
     expect(listHtml).not.toContain("font-size: 18px;");
-    expect(listHtml).not.toContain("body { color: blue; }</style>");
+    expect(listHtml).not.toContain(".channel-shell");
 
     const channelPage = await proxy.fetch(new Request("https://example.com/web/%23general", {
       headers: {
@@ -550,7 +568,7 @@ describe("IrcProxyDO web log persistence", () => {
     const channelHtml = await channelPage.text();
     expect(channelHtml).toContain('/proxy/main/web/%23general/messages');
     expect(channelHtml).toContain('/proxy/main/web/%23general/composer');
-    expect(channelHtml).toContain("body { color: blue; }");
+    expect(channelHtml).toContain('/proxy/main/web/theme.css');
     expect(channelHtml).toContain("--border-color: #654321;");
     expect(channelHtml).toContain("--link-bg: rgba(15,15,15,0.2);");
 
@@ -565,7 +583,7 @@ describe("IrcProxyDO web log persistence", () => {
     expect(messagesHtml).toContain("nearBottomThreshold = 48");
     expect(messagesHtml).toContain("sessionStorage.getItem");
     expect(messagesHtml).not.toContain("再読込");
-    expect(messagesHtml).toContain("body { color: blue; }");
+    expect(messagesHtml).toContain('/proxy/main/web/theme.css');
 
     const composerPage = await proxy.fetch(new Request("https://example.com/web/%23general/composer", {
       headers: {
@@ -578,7 +596,16 @@ describe("IrcProxyDO web log persistence", () => {
     expect(composerHtml).toContain('href="/proxy/main/web/"');
     expect(composerHtml).toContain('window.addEventListener("wheel"');
     expect(composerHtml).toContain('window.addEventListener("touchmove"');
-    expect(composerHtml).toContain("body { color: blue; }");
+    expect(composerHtml).toContain('/proxy/main/web/theme.css');
+
+    const themeResponse = await proxy.fetch(new Request("https://example.com/web/theme.css", {
+      headers: {
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+    }));
+    expect(themeResponse.status).toBe(200);
+    expect(await themeResponse.text()).toContain(".channel-shell {");
 
     const loginPage = await proxy.fetch(new Request("https://example.com/web/login", {
       headers: { "X-Proxy-Prefix": "/proxy/main" },
@@ -586,7 +613,7 @@ describe("IrcProxyDO web log persistence", () => {
     const loginHtml = await loginPage.text();
     expect(loginHtml).toContain("ADMIN_CSS");
     expect(loginHtml).not.toContain("font-size: 18px;");
-    expect(loginHtml).not.toContain("body { color: blue; }</style>");
+    expect(loginHtml).not.toContain(".channel-shell");
   });
 
   it("rejects invalid web UI settings without persisting them", async () => {
@@ -749,9 +776,10 @@ describe("IrcProxyDO web log persistence", () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
-      makeEnv({ CLIENT_PASSWORD: undefined })
+      makeEnv({ CLIENT_PASSWORD: "secret" })
     );
     await state.initPromise;
+    const cookieHeader = await loginWeb(proxy);
 
     const send = vi.fn().mockResolvedValue(undefined);
     (proxy as any).serverConn = {
@@ -761,7 +789,7 @@ describe("IrcProxyDO web log persistence", () => {
     (proxy as any).nick = "apricot";
 
     const composerResponse = await proxy.fetch(new Request("https://example.com/web/%23general/composer", {
-      headers: { "X-Proxy-Prefix": "/proxy/main" },
+      headers: { Cookie: cookieHeader, "X-Proxy-Prefix": "/proxy/main" },
     }));
     expect(composerResponse.status).toBe(200);
     expect(await composerResponse.text()).toContain('action="/proxy/main/web/%23general/composer"');
@@ -770,6 +798,7 @@ describe("IrcProxyDO web log persistence", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: cookieHeader,
         "X-Proxy-Prefix": "/proxy/main",
       },
       body: "message=hello",
@@ -779,7 +808,7 @@ describe("IrcProxyDO web log persistence", () => {
     expect(postHtml).toContain("channel-messages-frame");
 
     const messagesResponse = await proxy.fetch(new Request("https://example.com/web/%23general/messages", {
-      headers: { "X-Proxy-Prefix": "/proxy/main" },
+      headers: { Cookie: cookieHeader, "X-Proxy-Prefix": "/proxy/main" },
     }));
     const messagesHtml = await messagesResponse.text();
     expect(messagesResponse.status).toBe(200);
@@ -801,9 +830,10 @@ describe("IrcProxyDO web log persistence", () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
-      makeEnv({ CLIENT_PASSWORD: undefined })
+      makeEnv({ CLIENT_PASSWORD: "secret" })
     );
     await state.initPromise;
+    const cookieHeader = await loginWeb(proxy);
 
     const send = vi.fn().mockResolvedValue(undefined);
     (proxy as any).serverConn = {
@@ -833,6 +863,7 @@ describe("IrcProxyDO web log persistence", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: cookieHeader,
         "X-Proxy-Prefix": "/proxy/main",
       },
       body: "message=client-update",
@@ -849,9 +880,10 @@ describe("IrcProxyDO web log persistence", () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
-      makeEnv({ CLIENT_PASSWORD: undefined, IRC_ENCODING: "iso-2022-jp" })
+      makeEnv({ CLIENT_PASSWORD: "secret", IRC_ENCODING: "iso-2022-jp" })
     );
     await state.initPromise;
+    const cookieHeader = await loginWeb(proxy);
 
     const send = vi.fn().mockResolvedValue(undefined);
     (proxy as any).serverConn = {
@@ -864,6 +896,7 @@ describe("IrcProxyDO web log persistence", () => {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: cookieHeader,
         "X-Proxy-Prefix": "/proxy/main",
       },
       body: new URLSearchParams({ message: "hello😀" }).toString(),
@@ -873,7 +906,7 @@ describe("IrcProxyDO web log persistence", () => {
     expect(postHtml).toContain("channel-messages-frame");
 
     const messagesResponse = await proxy.fetch(new Request("https://example.com/web/%23general/messages", {
-      headers: { "X-Proxy-Prefix": "/proxy/main" },
+      headers: { Cookie: cookieHeader, "X-Proxy-Prefix": "/proxy/main" },
     }));
     const messagesHtml = await messagesResponse.text();
     expect(messagesResponse.status).toBe(200);
@@ -1186,37 +1219,33 @@ describe("IrcProxyDO web log persistence", () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
-      makeEnv()
+      makeEnv({ CLIENT_PASSWORD: "secret" })
     );
     await state.initPromise;
+    const cookieHeader = await loginWeb(proxy);
 
-    const send = vi.fn();
+    const send = vi.fn(async () => {
+      await (proxy as any).handleServerMessage({
+        prefix: "apricot!user@host",
+        command: "NICK",
+        params: ["apricot_alt"],
+      });
+    });
     (proxy as any).serverConn = {
       connected: true,
       send,
     };
     (proxy as any).nick = "apricot";
 
-    const responsePromise = proxy.fetch(new Request("https://example.com/web/nick", {
+    const response = await proxy.fetch(new Request("https://example.com/web/nick", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: cookieHeader,
         "X-Proxy-Prefix": "/proxy/main",
       },
       body: "nick=apricot_alt",
     }));
-
-    while (!(proxy as any).pendingNickChange) {
-      await Promise.resolve();
-    }
-
-    await (proxy as any).handleServerMessage({
-      prefix: "apricot!user@host",
-      command: "NICK",
-      params: ["apricot_alt"],
-    });
-
-    const response = await responsePromise;
     const html = await response.text();
     expect(response.status).toBe(200);
     expect(html).toContain("NICKを apricot_alt に変更しました");
@@ -1231,14 +1260,16 @@ describe("IrcProxyDO web log persistence", () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
-      makeEnv()
+      makeEnv({ CLIENT_PASSWORD: "secret" })
     );
     await state.initPromise;
+    const cookieHeader = await loginWeb(proxy);
 
     const response = await proxy.fetch(new Request("https://example.com/web/nick", {
       method: "POST",
       headers: {
         "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: cookieHeader,
         "X-Proxy-Prefix": "/proxy/main",
       },
       body: "nick=apricot_alt",
@@ -1250,26 +1281,13 @@ describe("IrcProxyDO web log persistence", () => {
     expect(html).toContain('value="apricot_alt"');
   });
 
-  it("allows web nick changes on a public web UI without authentication", async () => {
+  it("returns 503 for web nick changes when CLIENT_PASSWORD is not configured", async () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
       makeEnv({ CLIENT_PASSWORD: undefined })
     );
     await state.initPromise;
-
-    const send = vi.fn(async () => {
-      await (proxy as any).handleServerMessage({
-        prefix: "apricot!user@host",
-        command: "NICK",
-        params: ["apricot_public"],
-      });
-    });
-    (proxy as any).serverConn = {
-      connected: true,
-      send,
-    };
-    (proxy as any).nick = "apricot";
 
     const response = await proxy.fetch(new Request("https://example.com/web/nick", {
       method: "POST",
@@ -1279,10 +1297,8 @@ describe("IrcProxyDO web log persistence", () => {
       },
       body: "nick=apricot_public",
     }));
-    const html = await response.text();
 
-    expect(response.status).toBe(200);
-    expect(html).toContain("NICKを apricot_public に変更しました");
+    expect(response.status).toBe(503);
   });
 
   it("validates nick-change API input", async () => {

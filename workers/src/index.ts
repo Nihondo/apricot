@@ -4,7 +4,7 @@
  * Routes:
  *   POST /proxy/:id/api/connect — Connect proxy to IRC server (Bearer auth)
  *   GET  /proxy/:id/ws      — WebSocket endpoint for IRC clients
- *   GET  /proxy/:id/api/status — Get proxy status
+ *   GET  /proxy/:id/api/status — Get proxy status (Bearer auth)
  *   GET  /proxy/:id/web/    — Web chat interface (channel list)
  *   GET  /proxy/:id/web/:ch — Web chat shell
  *   GET  /proxy/:id/web/:ch/messages — Web chat message pane
@@ -18,7 +18,7 @@
  *   POST /proxy/:id/api/post — Programmatic message posting (Bearer auth)
  *   POST /proxy/:id/api/nick — Change IRC nick (Bearer auth)
  *   POST /proxy/:id/api/disconnect — Disconnect from IRC server (Bearer auth)
- *   GET  /proxy/:id/api/logs/:channel — Retrieve buffered messages for a channel
+ *   GET  /proxy/:id/api/logs/:channel — Retrieve buffered messages for a channel (Bearer auth)
  *   GET  /                   — Health check
  */
 
@@ -49,16 +49,13 @@ export default {
     const proxyId = match[1];
     const subpath = match[2] || "/";
 
-    const isReadOnlyApiRoute =
-      request.method === "GET" && (/^\/api\/logs\//.test(subpath) || subpath === "/api/status");
-
-    const requiresBearerAuth =
-      !isReadOnlyApiRoute && subpath.startsWith("/api/") && request.method !== "OPTIONS";
-
-    // Mutating management routes require Bearer token auth.
-    if (requiresBearerAuth) {
+    const isApiRoute = subpath.startsWith("/api/");
+    if (isApiRoute && request.method !== "OPTIONS") {
+      if (!env.API_KEY) {
+        return Response.json({ error: "API_KEY not configured" }, { status: 503 });
+      }
       const authHeader = request.headers.get("Authorization");
-      if (!env.API_KEY || authHeader !== `Bearer ${env.API_KEY}`) {
+      if (authHeader !== `Bearer ${env.API_KEY}`) {
         return Response.json({ error: "unauthorized" }, { status: 401 });
       }
     }

@@ -11,13 +11,13 @@ vi.mock("../../src/modules/url-metadata", () => ({
   resolveMessageEmbed: resolveMessageEmbedMock,
 }));
 vi.mock("../../src/templates/channel.html", () => ({
-  default: "<html><head><style>{{CSS}}</style></head><body><div class=\"shell\">{{FRAME_CONTENT}}</div></body></html>",
+  default: "<html><head><style>{{CSS}}</style>{{THEME_CSS_LINK}}</head><body><div class=\"shell\">{{FRAME_CONTENT}}</div></body></html>",
 }));
 vi.mock("../../src/templates/channel-messages.html", () => ({
-  default: "<html><head><style>{{CSS}}</style><script>{{AUTO_SCROLL_SCRIPT}}</script></head><body><div id=\"channel-messages-shell\">{{MESSAGES}}</div>{{RELOAD_BUTTON}}</body></html>",
+  default: "<html><head><style>{{CSS}}</style>{{THEME_CSS_LINK}}<script>{{AUTO_SCROLL_SCRIPT}}</script></head><body><div id=\"channel-messages-shell\">{{MESSAGES}}</div>{{RELOAD_BUTTON}}</body></html>",
 }));
 vi.mock("../../src/templates/channel-composer.html", () => ({
-  default: "<html><head><style>{{CSS}}</style><script>{{ON_LOAD_SCRIPT}}</script></head><body>{{FLASH_MESSAGE}}<form action=\"{{ACTION_URL}}\">{{CHANNEL_LIST_LINK}}<input name=\"message\" value=\"{{MESSAGE_VALUE}}\"><button>送信</button></form></body></html>",
+  default: "<html><head><style>{{CSS}}</style>{{THEME_CSS_LINK}}<script>{{ON_LOAD_SCRIPT}}</script></head><body>{{FLASH_MESSAGE}}<form action=\"{{ACTION_URL}}\">{{CHANNEL_LIST_LINK}}<input name=\"message\" value=\"{{MESSAGE_VALUE}}\"><button>送信</button></form></body></html>",
 }));
 vi.mock("../../src/templates/channel-list.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}<p>{{SERVER_NAME}} に {{NICK}} として参加</p>{{FLASH_MESSAGE}}{{NICK_FORM}}<div>{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</div><span>サーバー: {{SERVER_NAME}}</span><span>NICK: {{NICK}}</span></body></html>",
@@ -29,6 +29,7 @@ vi.mock("../../src/templates/settings.html", () => ({
 import {
   buildAdminCss,
   buildChannelCss,
+  buildCustomThemeCss,
   buildChannelListPage,
   buildSettingsPage,
   buildWebUiSettings,
@@ -277,7 +278,7 @@ describe("createWebModule", () => {
     expect(restored["#general"][199].text).toBe("msg-249");
   });
 
-  it("builds channel CSS with overrides and extra CSS appended", () => {
+  it("builds channel CSS without appending custom CSS inline", () => {
     const css = buildChannelCss(buildWebUiSettings({
       fontFamily: "\"Fira Sans\", sans-serif",
       fontSizePx: 18,
@@ -306,7 +307,15 @@ describe("createWebModule", () => {
     expect(css).toContain("--text-contrast-low: #666666;");
     expect(css).toContain("--link-bg: rgba(166,226,46,0.2);");
     expect(css).toContain("--accent-keyword: #FF4400;");
-    expect(css).toContain(".custom { color: red; }");
+    expect(css).not.toContain(".custom { color: red; }");
+  });
+
+  it("builds custom theme CSS separately", () => {
+    const css = buildCustomThemeCss(buildWebUiSettings({
+      extraCss: ".custom { color: red; }",
+    }));
+
+    expect(css).toBe(".custom { color: red; }");
   });
 
   it("builds fixed admin CSS separately from channel customization", () => {
@@ -383,7 +392,7 @@ describe("createWebModule", () => {
       sourceUrl: "https://cdn.example.com/cat.jpg",
       imageUrl: "https://cdn.example.com/cat.jpg",
     });
-    const web = createWebModule(new Map(), 0);
+    const web = createWebModule(new Map(), 0, undefined, 200, undefined, true);
     const ctx = makeContext();
 
     await web.module.handlers.get("ss_privmsg")?.(ctx, {
@@ -412,7 +421,7 @@ describe("createWebModule", () => {
       title: "Example title",
       siteName: "Example",
     });
-    const web = createWebModule(new Map(), 0);
+    const web = createWebModule(new Map(), 0, undefined, 200, undefined, true);
     const ctx = makeContext();
 
     await web.module.handlers.get("ss_privmsg")?.(ctx, {
@@ -460,7 +469,7 @@ describe("createWebModule", () => {
       title: "Xユーザーのexampleさん",
       description: "post body",
     });
-    const web = createWebModule(new Map(), 0);
+    const web = createWebModule(new Map(), 0, undefined, 200, undefined, true);
     const ctx = makeContext();
 
     await web.module.handlers.get("ss_privmsg")?.(ctx, {

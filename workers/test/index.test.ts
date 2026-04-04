@@ -60,6 +60,33 @@ describe("worker auth", () => {
     expect(get).not.toHaveBeenCalled();
   });
 
+  it("requires bearer auth for /api/status", async () => {
+    const { env, get } = makeEnv();
+
+    const response = await worker.fetch(
+      new Request("https://example.com/proxy/main/api/status", { method: "GET" }),
+      env
+    );
+
+    expect(response.status).toBe(401);
+    expect(await response.json()).toEqual({ error: "unauthorized" });
+    expect(get).not.toHaveBeenCalled();
+  });
+
+  it("returns 503 when API_KEY is not configured", async () => {
+    const { env, get } = makeEnv();
+    delete (env as Partial<Env>).API_KEY;
+
+    const response = await worker.fetch(
+      new Request("https://example.com/proxy/main/api/connect", { method: "POST" }),
+      env
+    );
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toEqual({ error: "API_KEY not configured" });
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it("forwards /api/connect when bearer auth is present", async () => {
     const { env, fetch, get } = makeEnv();
 

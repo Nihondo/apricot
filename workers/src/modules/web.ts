@@ -24,6 +24,7 @@ import {
   resolveMessageEmbed,
   type ResolvedUrlEmbed,
 } from "./url-metadata";
+import { sanitizeCustomCss } from "../custom-css";
 
 // ---------------------------------------------------------------------------
 // Message storage
@@ -232,8 +233,16 @@ export function buildChannelCss(settings: WebUiSettings): string {
     `:root {\n  ${rootLines.join("\n  ")}\n}`,
     `body,\ninput,\nbutton,\ntextarea {\n  ${typographyLines.join("\n  ")}\n}`,
   ];
-  const extraCss = settings.extraCss.trim();
-  return [CSS, ...blocks, extraCss].filter(Boolean).join("\n\n");
+  return [CSS, ...blocks].join("\n\n");
+}
+
+export function buildCustomThemeCss(settings: WebUiSettings): string {
+  return settings.extraCss.trim();
+}
+
+export function sanitizeStoredCustomCss(extraCss: string): string {
+  const result = sanitizeCustomCss(extraCss);
+  return result.ok ? result.value : "";
 }
 
 function renderThemeColorFields(webUiSettings: WebUiSettings): string {
@@ -1037,7 +1046,8 @@ export function createWebModule(
   timezoneOffset = 0,
   persistLogs?: PersistLogsCallback,
   maxLines = DEFAULT_maxLines,
-  onChannelLogsChanged?: ChannelLogsChangedCallback
+  onChannelLogsChanged?: ChannelLogsChangedCallback,
+  enableRemoteUrlPreview = false,
 ) {
   const store: MessageBufferStore = new Map();
 
@@ -1084,13 +1094,14 @@ export function createWebModule(
     nick: string,
     text: string,
     embed?: ResolvedUrlEmbed,
+    shouldResolveEmbed = false,
   ): Promise<StoredMessage> {
     return {
       time: Date.now(),
       type,
       nick,
       text,
-      embed: embed ?? await resolveMessageEmbed(text),
+      embed: embed ?? (shouldResolveEmbed ? await resolveMessageEmbed(text) : undefined),
     };
   }
 
@@ -1100,7 +1111,7 @@ export function createWebModule(
       const target = msg.params[0];
       const text = msg.params[1] || "";
       const channel = isChannel(target) ? target : nick; // DM keyed by sender nick
-      await appendMessage(channel, await buildTextMessage("privmsg", nick, text));
+      await appendMessage(channel, await buildTextMessage("privmsg", nick, text, undefined, enableRemoteUrlPreview));
       return msg;
     });
 
@@ -1109,7 +1120,7 @@ export function createWebModule(
       const target = msg.params[0];
       const text = msg.params[1] || "";
       const channel = isChannel(target) ? target : nick;
-      await appendMessage(channel, await buildTextMessage("notice", nick, text));
+      await appendMessage(channel, await buildTextMessage("notice", nick, text, undefined, enableRemoteUrlPreview));
       return msg;
     });
 
@@ -1199,7 +1210,8 @@ export function createWebModule(
     selfNick: string,
     basePath: string,
     showLogout = false,
-    webUiSettings: WebUiSettings = DEFAULT_WEB_UI_SETTINGS
+    webUiSettings: WebUiSettings = DEFAULT_WEB_UI_SETTINGS,
+    themeCssHref = ""
   ): string {
     const channelBasePath = `${basePath}/${encodeURIComponent(channel)}`;
     const messagesUrl = `${channelBasePath}/messages`;
@@ -1212,6 +1224,7 @@ export function createWebModule(
 
     return CHANNEL_SHELL_TEMPLATE
       .replace("{{CSS}}", buildChannelCss(webUiSettings))
+      .replace("{{THEME_CSS_LINK}}", themeCssHref ? `<link rel="stylesheet" href="${themeCssHref}">` : "")
       .replace("{{CHANNEL}}", escapeHtml(channel))
       .replace("{{TOPIC}}", escapeHtml(topic))
       .replace("{{FRAME_CONTENT}}", frameContent);
@@ -1222,7 +1235,8 @@ export function createWebModule(
     topic: string,
     selfNick: string,
     webUiSettings: WebUiSettings = DEFAULT_WEB_UI_SETTINGS,
-    channelRevision = 0
+    channelRevision = 0,
+    themeCssHref = ""
   ): string {
     const messagesHtml = buildChannelMessagesFragment(channel, selfNick, webUiSettings);
     const reloadButton = webUiSettings.displayOrder === "desc"
@@ -1240,6 +1254,7 @@ export function createWebModule(
 
     return CHANNEL_MESSAGES_TEMPLATE
       .replace("{{CSS}}", buildChannelCss(webUiSettings))
+      .replace("{{THEME_CSS_LINK}}", themeCssHref ? `<link rel="stylesheet" href="${themeCssHref}">` : "")
       .replace("{{CHANNEL}}", escapeHtml(channel))
       .replace("{{TOPIC}}", escapeHtml(topic))
       .replace("{{RELOAD_BUTTON}}", reloadButton)
@@ -1290,7 +1305,8 @@ export function createWebModule(
     flashMessage = "",
     flashTone: "info" | "danger" = "info",
     webUiSettings: WebUiSettings = DEFAULT_WEB_UI_SETTINGS,
-    shouldReloadMessages = false
+    shouldReloadMessages = false,
+    themeCssHref = ""
   ): string {
     const actionUrl = `${basePath}/${encodeURIComponent(channel)}/composer`;
     const channelListLink = `<a href="${basePath}/" target="_top" class="channel-list-link" aria-label="チャンネル一覧へ戻る" title="チャンネル一覧へ戻る">☰</a>`;
@@ -1299,6 +1315,7 @@ export function createWebModule(
 
     return CHANNEL_COMPOSER_TEMPLATE
       .replace("{{CSS}}", buildChannelCss(webUiSettings))
+      .replace("{{THEME_CSS_LINK}}", themeCssHref ? `<link rel="stylesheet" href="${themeCssHref}">` : "")
       .replace("{{CHANNEL}}", escapeHtml(channel))
       .replace("{{ACTION_URL}}", actionUrl)
       .replace("{{CHANNEL_LIST_LINK}}", channelListLink)

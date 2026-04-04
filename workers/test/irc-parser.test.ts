@@ -112,6 +112,11 @@ describe("build", () => {
     const raw = ":irc.example.com 001 mynick :Welcome to IRC, mynick";
     expect(build(parse(raw))).toBe(raw);
   });
+
+  it("rejects params containing line breaks", () => {
+    expect(() => build({ command: "PRIVMSG", params: ["#chan", "hello\r\nNOTICE * :boom"] }))
+      .toThrow("unsafe IRC param");
+  });
 });
 
 // ---------------------------------------------------------------------------

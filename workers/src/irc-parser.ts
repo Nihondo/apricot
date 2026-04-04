@@ -10,6 +10,12 @@ export interface IrcMessage {
   params: string[];
 }
 
+function assertSafeIrcField(value: string, fieldName: string): void {
+  if (/[\r\n\0]/.test(value)) {
+    throw new Error(`unsafe IRC ${fieldName}`);
+  }
+}
+
 /**
  * Parse a raw IRC message line into structured form.
  * Supports IRCv3 message tags.
@@ -83,18 +89,23 @@ export function build(msg: IrcMessage): string {
   if (msg.tags && msg.tags.size > 0) {
     const tagParts: string[] = [];
     for (const [k, v] of msg.tags) {
+      assertSafeIrcField(k, "tag key");
+      assertSafeIrcField(v, "tag value");
       tagParts.push(v ? `${k}=${v}` : k);
     }
     parts.push("@" + tagParts.join(";"));
   }
 
   if (msg.prefix) {
+    assertSafeIrcField(msg.prefix, "prefix");
     parts.push(":" + msg.prefix);
   }
 
+  assertSafeIrcField(msg.command, "command");
   parts.push(msg.command);
 
   for (let i = 0; i < msg.params.length; i++) {
+    assertSafeIrcField(msg.params[i], "param");
     const isLast = i === msg.params.length - 1;
     if (isLast && (msg.params[i] === "" || msg.params[i].includes(" ") || msg.params[i].startsWith(":"))) {
       parts.push(":" + msg.params[i]);

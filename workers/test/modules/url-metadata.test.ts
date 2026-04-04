@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   extractUrlMetadata,
+  isAllowedPreviewUrl,
   resolveMessageEmbed,
   resolveUrlEmbed,
 } from "../../src/modules/url-metadata";
@@ -193,5 +194,20 @@ describe("url metadata resolver", () => {
     ));
 
     await expect(resolveUrlEmbed("https://example.com/no-preview")).resolves.toBeUndefined();
+  });
+
+  it("rejects localhost and private-network preview URLs", async () => {
+    expect(isAllowedPreviewUrl("http://localhost/test")).toBe(false);
+    expect(isAllowedPreviewUrl("http://127.0.0.1/test")).toBe(false);
+    expect(isAllowedPreviewUrl("http://169.254.1.1/test")).toBe(false);
+    expect(isAllowedPreviewUrl("http://10.0.0.1/test")).toBe(false);
+    expect(isAllowedPreviewUrl("http://example.com:8080/test")).toBe(false);
+  });
+
+  it("does not fetch blocked preview URLs from message text", async () => {
+    const embed = await resolveMessageEmbed("first http://localhost/test then http://10.0.0.1/x");
+
+    expect(embed).toBeUndefined();
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

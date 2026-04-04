@@ -14,6 +14,7 @@ interface Env {
   CLIENT_PASSWORD?: string;
   IRC_AUTO_CONNECT_ON_STARTUP?: string;
   IRC_AUTO_RECONNECT_ON_DISCONNECT?: string;
+  ENABLE_REMOTE_URL_PREVIEW?: string;
   // Channels
   IRC_AUTOJOIN: string;
   // DO keepalive

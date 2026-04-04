@@ -10,6 +10,7 @@ export interface ProxyConfig {
   autojoin?: string[];
   autoConnectOnStartup: boolean;
   autoReconnectOnDisconnect: boolean;
+  enableRemoteUrlPreview: boolean;
 }
 
 /**
@@ -35,6 +36,7 @@ export function buildProxyConfigFromEnv(env: Env): ProxyConfig | null {
     autojoin: splitCsvValue(env.IRC_AUTOJOIN),
     autoConnectOnStartup: parseBooleanEnv(env.IRC_AUTO_CONNECT_ON_STARTUP),
     autoReconnectOnDisconnect: parseBooleanEnv(env.IRC_AUTO_RECONNECT_ON_DISCONNECT),
+    enableRemoteUrlPreview: parseBooleanEnv(env.ENABLE_REMOTE_URL_PREVIEW),
   };
 }
 

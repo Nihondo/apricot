@@ -67,6 +67,7 @@ describe("buildProxyConfigFromEnv", () => {
       autojoin: ["#general", "#test"],
       autoConnectOnStartup: true,
       autoReconnectOnDisconnect: true,
+      enableRemoteUrlPreview: false,
     });
   });
 

@@ -38,6 +38,61 @@ interface HtmlMetadata {
   finalUrl: string;
 }
 
+function isPrivateIpv4(hostname: string): boolean {
+  const parts = hostname.split(".").map((part) => Number.parseInt(part, 10));
+  if (parts.length !== 4 || parts.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return false;
+  }
+  return parts[0] === 10
+    || parts[0] === 127
+    || (parts[0] === 169 && parts[1] === 254)
+    || (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31)
+    || (parts[0] === 192 && parts[1] === 168);
+}
+
+function isPrivateIpv6(hostname: string): boolean {
+  const normalized = hostname.toLowerCase();
+  return normalized === "::1"
+    || normalized.startsWith("fc")
+    || normalized.startsWith("fd")
+    || normalized.startsWith("fe8")
+    || normalized.startsWith("fe9")
+    || normalized.startsWith("fea")
+    || normalized.startsWith("feb");
+}
+
+export function isAllowedPreviewUrl(url: string): boolean {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    return false;
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return false;
+  }
+  if (parsed.username || parsed.password) {
+    return false;
+  }
+  if (parsed.port) {
+    const allowedPort = parsed.protocol === "https:" ? "443" : "80";
+    if (parsed.port !== allowedPort) {
+      return false;
+    }
+  }
+
+  const hostname = parsed.hostname.toLowerCase();
+  if (!hostname || hostname === "localhost" || hostname.endsWith(".local") || hostname.endsWith(".internal")) {
+    return false;
+  }
+  if (isPrivateIpv4(hostname) || isPrivateIpv6(hostname)) {
+    return false;
+  }
+
+  return true;
+}
+
 /**
  * Extract metadata from a URL for posting to IRC.
  *
@@ -46,6 +101,9 @@ interface HtmlMetadata {
  * - Fallback: returns the URL as-is
  */
 export async function extractUrlMetadata(url: string): Promise<string> {
+  if (!isAllowedPreviewUrl(url)) {
+    return url;
+  }
   try {
     if (X_URL_RE.test(url)) {
       return await extractTwitterMetadata(url);
@@ -62,6 +120,9 @@ export async function extractUrlMetadata(url: string): Promise<string> {
 export async function resolveMessageEmbed(text: string): Promise<ResolvedUrlEmbed | undefined> {
   const urls = Array.from(text.matchAll(URL_RE), (match) => match[1]);
   for (const url of urls) {
+    if (!isAllowedPreviewUrl(url)) {
+      continue;
+    }
     const embed = await resolveUrlEmbed(url);
     if (embed) {
       return embed;
@@ -74,6 +135,9 @@ export async function resolveMessageEmbed(text: string): Promise<ResolvedUrlEmbe
  * Resolves a URL into a stored preview representation for the Web UI.
  */
 export async function resolveUrlEmbed(url: string): Promise<ResolvedUrlEmbed | undefined> {
+  if (!isAllowedPreviewUrl(url)) {
+    return undefined;
+  }
   try {
     const imageEmbed = resolveDirectImageEmbed(url);
     if (imageEmbed) {
@@ -129,6 +193,9 @@ async function extractPageTitle(url: string): Promise<string> {
 }
 
 function resolveDirectImageEmbed(url: string): ResolvedUrlEmbed | undefined {
+  if (!isAllowedPreviewUrl(url)) {
+    return undefined;
+  }
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -284,6 +351,9 @@ async function fetchXOEmbedPayload(url: string): Promise<OEmbedPayload | undefin
 }
 
 async function fetchHtmlMetadata(url: string): Promise<HtmlMetadata | undefined> {
+  if (!isAllowedPreviewUrl(url)) {
+    return undefined;
+  }
   const resp = await fetch(url, {
     headers: {
       "User-Agent": "apricot-irc-proxy/0.1",
@@ -294,6 +364,10 @@ async function fetchHtmlMetadata(url: string): Promise<HtmlMetadata | undefined>
   });
 
   if (!resp.ok) {
+    return undefined;
+  }
+  const finalUrl = resp.url || url;
+  if (!isAllowedPreviewUrl(finalUrl)) {
     return undefined;
   }
 
@@ -326,7 +400,7 @@ async function fetchHtmlMetadata(url: string): Promise<HtmlMetadata | undefined>
 
   return {
     html,
-    finalUrl: resp.url || url,
+    finalUrl,
   };
 }
 
@@ -389,6 +463,9 @@ function extractOEmbedLinkHref(html: string, baseUrl: string): string | undefine
 }
 
 async function fetchOEmbed(url: string): Promise<OEmbedPayload | undefined> {
+  if (!isAllowedPreviewUrl(url)) {
+    return undefined;
+  }
   try {
     const resp = await fetch(url, {
       headers: { "User-Agent": "apricot-irc-proxy/0.1" },
@@ -396,6 +473,9 @@ async function fetchOEmbed(url: string): Promise<OEmbedPayload | undefined> {
       signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
     });
     if (!resp.ok) {
+      return undefined;
+    }
+    if (!isAllowedPreviewUrl(resp.url || url)) {
       return undefined;
     }
     return await resp.json() as OEmbedPayload;
@@ -416,7 +496,8 @@ function resolveOEmbedImage(payload: OEmbedPayload, baseUrl: string): string | u
 
 function resolveAgainstBaseUrl(candidate: string, baseUrl: string): string | undefined {
   try {
-    return new URL(candidate, baseUrl).toString();
+    const resolved = new URL(candidate, baseUrl).toString();
+    return isAllowedPreviewUrl(resolved) ? resolved : undefined;
   } catch {
     return undefined;
   }
@@ -506,6 +587,9 @@ function extractYouTubeVideoId(url: string): string | undefined {
 }
 
 async function canFetchImage(url: string): Promise<boolean> {
+  if (!isAllowedPreviewUrl(url)) {
+    return false;
+  }
   try {
     const resp = await fetch(url, {
       method: "HEAD",
@@ -513,6 +597,9 @@ async function canFetchImage(url: string): Promise<boolean> {
       redirect: "follow",
       signal: AbortSignal.timeout(5_000),
     });
+    if (!isAllowedPreviewUrl(resp.url || url)) {
+      return false;
+    }
     const contentType = resp.headers.get("Content-Type") || "";
     return resp.ok && contentType.startsWith("image/");
   } catch {

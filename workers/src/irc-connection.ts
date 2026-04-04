@@ -141,6 +141,9 @@ export class IrcServerConnection {
   }
 
   async sendRaw(line: string): Promise<void> {
+    if (/[\r\n\0]/.test(line)) {
+      throw new Error("unsafe IRC line");
+    }
     if (!this.writer) return;
     try {
       await this.writer.write(this.encodeForServer(line + "\r\n"));

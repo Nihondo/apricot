@@ -12,6 +12,7 @@ import { createChannelTrackModule, type ChannelState } from "./modules/channel-t
 import { createClientSyncModule } from "./modules/client-sync";
 import {
   buildAdminCss,
+  buildCustomThemeCss,
   buildChannelListPage,
   buildSettingsPage,
   buildWebUiSettings,
@@ -19,6 +20,7 @@ import {
   DEFAULT_WEB_UI_SETTINGS,
   LIGHT_WEB_UI_COLOR_PRESET,
   isWebDisplayOrder,
+  sanitizeStoredCustomCss,
   type PersistedWebLogs,
   type WebUiColorSettings,
   type WebUiSettings,
@@ -28,8 +30,15 @@ import {
   resolveUrlEmbed,
   type ResolvedUrlEmbed,
 } from "./modules/url-metadata";
+import {
+  validateChannelInput,
+  validateMessageInput,
+  validateNickInput,
+  validatePasswordInput,
+} from "./input-validation";
 import { buildProxyConfigFromEnv, type ProxyConfig } from "./proxy-config";
 import { escapeUnsupportedIrcText } from "./irc-text-escape";
+import { sanitizeCustomCss } from "./custom-css";
 import LOGIN_TEMPLATE from "./templates/login.html";
 
 const reconnectDelayMs = 5_000;
@@ -112,7 +121,8 @@ export class IrcProxyDO implements DurableObject {
       webLogMaxLines,
       (channels) => {
         this.handleChannelLogsChanged(channels);
-      }
+      },
+      this.config?.enableRemoteUrlPreview ?? false,
     );
 
     // Module registration order matters for QUIT/NICK:
@@ -141,13 +151,23 @@ export class IrcProxyDO implements DurableObject {
     const isWebLoginPath = url.pathname === "/web/login" || url.pathname === "/web/login/";
     const isWebLogoutPath = url.pathname === "/web/logout" || url.pathname === "/web/logout/";
     const isWebSettingsPath = url.pathname === "/web/settings" || url.pathname === "/web/settings/";
+    const isWebThemePath = url.pathname === "/web/theme.css" || url.pathname === "/web/theme.css/";
+    const isWebRequest = url.pathname === "/web"
+      || url.pathname === "/web/"
+      || url.pathname === "/ws"
+      || /^\/web\/.+$/.test(url.pathname);
     const isProtectedWebRequest = (
       url.pathname === "/web" ||
       url.pathname === "/web/" ||
       /^\/web\/.+$/.test(url.pathname)
-    ) && !isWebLoginPath && !isWebLogoutPath;
+    ) && !isWebLoginPath && !isWebLogoutPath && !isWebThemePath;
+    const isProtectedWebAssetRequest = Boolean(webUpdatesMatch) || isWebThemePath;
 
-    if (webUpdatesMatch && !await this.isWebAuthenticated(request, proxyPrefix)) {
+    if (isWebRequest && !this.config?.password) {
+      return new Response("CLIENT_PASSWORD not configured", { status: 503 });
+    }
+
+    if (isProtectedWebAssetRequest && !await this.isWebAuthenticated(request, proxyPrefix)) {
       return new Response("Unauthorized", { status: 401 });
     }
 
@@ -197,7 +217,7 @@ export class IrcProxyDO implements DurableObject {
         channels: this.channels,
         clients: this.clients.size,
         serverName: this.serverName,
-      });
+      }, { headers: corsHeaders() });
     }
 
     // --- API routes ---
@@ -254,6 +274,10 @@ export class IrcProxyDO implements DurableObject {
       return this.renderWebLoginPage(`${webBase}/login`);
     }
 
+    if (request.method === "GET" && isWebThemePath) {
+      return this.renderWebThemeCss();
+    }
+
     // POST /web/login — validate password and set session cookie
     if (request.method === "POST" && isWebLoginPath) {
       return this.handleWebLogin(request, proxyPrefix, webBase);
@@ -291,10 +315,20 @@ export class IrcProxyDO implements DurableObject {
     // POST /web/join — join a channel from web UI
     if (request.method === "POST" && (url.pathname === "/web/join" || url.pathname === "/web/join/")) {
       const formData = await request.formData();
-      const channel = (formData.get("channel") as string | null)?.trim() ?? "";
-      if (channel && this.serverConn?.connected) {
-        await this.serverConn.send({ command: "JOIN", params: [channel] });
+      const channelResult = validateChannelInput(formData.get("channel") as string | null);
+      if (!channelResult.ok) {
+        return new Response(
+          this.buildWebChannelListPage(webBase, this.nick, `JOIN に失敗しました: ${channelResult.error}`, "danger"),
+          { status: 400, headers: { "Content-Type": "text/html; charset=utf-8" } }
+        );
       }
+      if (!this.serverConn?.connected) {
+        return new Response(
+          this.buildWebChannelListPage(webBase, this.nick, "JOIN に失敗しました: not connected to IRC server", "danger"),
+          { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } }
+        );
+      }
+      await this.serverConn.send({ command: "JOIN", params: [channelResult.value] });
       return new Response(null, {
         status: 302,
         headers: { Location: `${webBase}/` },
@@ -304,10 +338,20 @@ export class IrcProxyDO implements DurableObject {
     // POST /web/leave — leave a channel from web UI
     if (request.method === "POST" && (url.pathname === "/web/leave" || url.pathname === "/web/leave/")) {
       const formData = await request.formData();
-      const channel = (formData.get("channel") as string | null)?.trim() ?? "";
-      if (channel && this.serverConn?.connected) {
-        await this.serverConn.send({ command: "PART", params: [channel] });
+      const channelResult = validateChannelInput(formData.get("channel") as string | null);
+      if (!channelResult.ok) {
+        return new Response(
+          this.buildWebChannelListPage(webBase, this.nick, `PART に失敗しました: ${channelResult.error}`, "danger"),
+          { status: 400, headers: { "Content-Type": "text/html; charset=utf-8" } }
+        );
       }
+      if (!this.serverConn?.connected) {
+        return new Response(
+          this.buildWebChannelListPage(webBase, this.nick, "PART に失敗しました: not connected to IRC server", "danger"),
+          { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } }
+        );
+      }
+      await this.serverConn.send({ command: "PART", params: [channelResult.value] });
       return new Response(null, {
         status: 302,
         headers: { Location: `${webBase}/` },
@@ -343,7 +387,8 @@ export class IrcProxyDO implements DurableObject {
         return new Response("Method Not Allowed", { status: 405 });
       }
       return this.renderWebChannelMessagesPage(
-        decodeURIComponent(webMessagesMatch[1])
+        decodeURIComponent(webMessagesMatch[1]),
+        webBase
       );
     }
 
@@ -413,7 +458,12 @@ export class IrcProxyDO implements DurableObject {
 
       // Forward to server if not dropped
       if (result && this.serverConn?.connected) {
-        await this.serverConn.send(result);
+        try {
+          await this.serverConn.send(result);
+        } catch {
+          ws.close(1008, "Invalid IRC message");
+          return;
+        }
       }
     }
   }
@@ -476,10 +526,10 @@ export class IrcProxyDO implements DurableObject {
       );
     }
 
-    const channel = body.channel;
-    if (!channel) {
+    const channelResult = validateChannelInput(body.channel);
+    if (!channelResult.ok) {
       return Response.json(
-        { error: "missing channel" },
+        { error: channelResult.error },
         { status: 400, headers: corsHeaders() }
       );
     }
@@ -493,10 +543,10 @@ export class IrcProxyDO implements DurableObject {
 
     await this.serverConn.send({
       command: "JOIN",
-      params: [channel],
+      params: [channelResult.value],
     });
 
-    return Response.json({ ok: true, channel }, { headers: corsHeaders() });
+    return Response.json({ ok: true, channel: channelResult.value }, { headers: corsHeaders() });
   }
 
   private async handleApiLeave(request: Request): Promise<Response> {
@@ -510,10 +560,10 @@ export class IrcProxyDO implements DurableObject {
       );
     }
 
-    const channel = body.channel;
-    if (!channel) {
+    const channelResult = validateChannelInput(body.channel);
+    if (!channelResult.ok) {
       return Response.json(
-        { error: "missing channel" },
+        { error: channelResult.error },
         { status: 400, headers: corsHeaders() }
       );
     }
@@ -527,10 +577,10 @@ export class IrcProxyDO implements DurableObject {
 
     await this.serverConn.send({
       command: "PART",
-      params: [channel],
+      params: [channelResult.value],
     });
 
-    return Response.json({ ok: true, channel }, { headers: corsHeaders() });
+    return Response.json({ ok: true, channel: channelResult.value }, { headers: corsHeaders() });
   }
 
   private async handleApiPost(request: Request): Promise<Response> {
@@ -544,10 +594,10 @@ export class IrcProxyDO implements DurableObject {
       );
     }
 
-    const channel = body.channel;
-    if (!channel) {
+    const channelResult = validateChannelInput(body.channel);
+    if (!channelResult.ok) {
       return Response.json(
-        { error: "missing channel" },
+        { error: channelResult.error },
         { status: 400, headers: corsHeaders() }
       );
     }
@@ -584,7 +634,7 @@ export class IrcProxyDO implements DurableObject {
       );
     }
 
-    const postResult = await this.postChannelMessage(channel, text, embed);
+    const postResult = await this.postChannelMessage(channelResult.value, text, embed);
     if (!postResult.ok) {
       return Response.json(
         { error: postResult.error },
@@ -609,8 +659,7 @@ export class IrcProxyDO implements DurableObject {
       );
     }
 
-    const nick = body.nick?.trim();
-    const nickChangeResult = await this.requestNickChange(nick);
+    const nickChangeResult = await this.requestNickChange(body.nick);
     if (!nickChangeResult.ok) {
       return Response.json({ error: nickChangeResult.error }, { status: nickChangeResult.status, headers: corsHeaders() });
     }
@@ -620,7 +669,7 @@ export class IrcProxyDO implements DurableObject {
 
   private async handleWebNick(request: Request, webBase: string): Promise<Response> {
     const formData = await request.formData();
-    const nick = (formData.get("nick") as string | null)?.trim() ?? "";
+    const nick = (formData.get("nick") as string | null) ?? "";
     const nickChangeResult = await this.requestNickChange(nick);
 
     if (!nickChangeResult.ok) {
@@ -664,10 +713,11 @@ export class IrcProxyDO implements DurableObject {
     | { ok: true; nick: string }
     | { ok: false; error: string; status: number }
   > {
-    const requestedNick = nick?.trim() ?? "";
-    if (!requestedNick) {
-      return { ok: false, error: "missing nick", status: 400 };
+    const nickResult = validateNickInput(nick);
+    if (!nickResult.ok) {
+      return { ok: false, error: nickResult.error, status: 400 };
     }
+    const requestedNick = nickResult.value;
 
     if (!this.serverConn?.connected) {
       return { ok: false, error: "not connected to IRC server", status: 503 };
@@ -721,14 +771,21 @@ export class IrcProxyDO implements DurableObject {
   }
 
   private handleApiLogs(channel: string): Response {
-    const logs = this.web.getChannelLogs(channel);
+    const channelResult = validateChannelInput(channel);
+    if (!channelResult.ok) {
+      return Response.json(
+        { error: channelResult.error },
+        { status: 400, headers: corsHeaders() }
+      );
+    }
+    const logs = this.web.getChannelLogs(channelResult.value);
     if (logs === null) {
       return Response.json(
         { error: "channel not found" },
         { status: 404, headers: corsHeaders() }
       );
     }
-    return Response.json({ channel, messages: logs }, { headers: corsHeaders() });
+    return Response.json({ channel: channelResult.value, messages: logs }, { headers: corsHeaders() });
   }
 
   private async handleApiDisconnect(): Promise<Response> {
@@ -759,21 +816,23 @@ export class IrcProxyDO implements DurableObject {
       this.nick,
       webBase,
       Boolean(this.config?.password),
-      this.webUiSettings
+      this.webUiSettings,
+      `${webBase}/theme.css`
     );
     return new Response(html, {
       headers: { "Content-Type": "text/html; charset=utf-8" },
     });
   }
 
-  private renderWebChannelMessagesPage(channel: string): Response {
+  private renderWebChannelMessagesPage(channel: string, webBase: string): Response {
     const revision = this.getChannelRevision(channel);
     const html = this.web.buildChannelMessagesPage(
       channel,
       this.getChannelTopic(channel),
       this.nick,
       this.webUiSettings,
-      revision
+      revision,
+      `${webBase}/theme.css`
     );
     return new Response(html, {
       headers: this.buildWebMessagesHeaders(revision),
@@ -808,7 +867,8 @@ export class IrcProxyDO implements DurableObject {
       flashMessage,
       flashTone,
       this.webUiSettings,
-      shouldReloadMessages
+      shouldReloadMessages,
+      `${webBase}/theme.css`
     );
     return new Response(html, {
       status,
@@ -856,16 +916,18 @@ export class IrcProxyDO implements DurableObject {
     | { ok: true; message: string; channel: string }
     | { ok: false; error: string; status: number }
   > {
-    const targetChannel = channel?.trim() ?? "";
-    if (!targetChannel) {
-      return { ok: false, error: "missing channel", status: 400 };
+    const channelResult = validateChannelInput(channel);
+    if (!channelResult.ok) {
+      return { ok: false, error: channelResult.error, status: 400 };
     }
 
-    const trimmedMessage = message?.trim() ?? "";
-    if (!trimmedMessage) {
-      return { ok: false, error: "missing message", status: 400 };
+    const messageResult = validateMessageInput(message);
+    if (!messageResult.ok) {
+      return { ok: false, error: messageResult.error, status: 400 };
     }
 
+    const targetChannel = channelResult.value;
+    const trimmedMessage = messageResult.value;
     const serverMessage = escapeUnsupportedIrcText(trimmedMessage, this.config?.server.encoding);
 
     if (!this.serverConn?.connected) {
@@ -896,7 +958,12 @@ export class IrcProxyDO implements DurableObject {
 
     if (cmd === "PASS") {
       // Store password for validation when USER arrives
-      this.pendingPasswords.set(ws, msg.params[0] || "");
+      const passwordResult = validatePasswordInput(msg.params[0] || "");
+      if (!passwordResult.ok) {
+        ws.close(1008, "Invalid password");
+        return;
+      }
+      this.pendingPasswords.set(ws, passwordResult.value);
       return;
     }
 
@@ -1214,6 +1281,15 @@ export class IrcProxyDO implements DurableObject {
     await this.state.storage.put(webUiSettingsStorageKey, settings);
   }
 
+  private renderWebThemeCss(): Response {
+    return new Response(buildCustomThemeCss(this.webUiSettings), {
+      headers: {
+        "Content-Type": "text/css; charset=utf-8",
+        "Cache-Control": "no-store",
+      },
+    });
+  }
+
   private buildWebMessagesHeaders(revision: number): HeadersInit {
     return {
       "Content-Type": "text/html; charset=utf-8",
@@ -1400,13 +1476,14 @@ export class IrcProxyDO implements DurableObject {
     draftSettings.displayOrder = displayOrder;
 
     const extraCss = (formData.get("extraCss") as string | null) ?? "";
-    draftSettings.extraCss = extraCss;
-    if (extraCss.length > 10_240) {
+    const customCssResult = sanitizeCustomCss(extraCss);
+    if (!customCssResult.ok) {
       return {
         settings: { ...draftSettings },
-        errorMessage: "Extra CSS は 10KB 以下にしてください",
+        errorMessage: customCssResult.error,
       };
     }
+    draftSettings.extraCss = customCssResult.value;
 
     const highlightKeywords = (formData.get("highlightKeywords") as string | null) ?? "";
     if (highlightKeywords.length > 2048) {
@@ -1449,8 +1526,8 @@ export class IrcProxyDO implements DurableObject {
     const displayOrder = stored.displayOrder && isWebDisplayOrder(stored.displayOrder)
       ? stored.displayOrder
       : DEFAULT_WEB_UI_SETTINGS.displayOrder;
-    const extraCss = typeof stored.extraCss === "string" && stored.extraCss.length <= 10_240
-      ? stored.extraCss
+    const extraCss = typeof stored.extraCss === "string"
+      ? sanitizeStoredCustomCss(stored.extraCss)
       : DEFAULT_WEB_UI_SETTINGS.extraCss;
     const highlightKeywords = typeof stored.highlightKeywords === "string" && stored.highlightKeywords.length <= 2048
       ? stored.highlightKeywords
@@ -1537,7 +1614,7 @@ export class IrcProxyDO implements DurableObject {
 function corsHeaders(): HeadersInit {
   return {
     "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "POST, OPTIONS",
+    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization",
   };
 }
