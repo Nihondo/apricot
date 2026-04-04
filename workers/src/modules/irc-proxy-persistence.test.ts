@@ -15,7 +15,7 @@ vi.mock("../templates/login.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{ERROR}}<form action=\"{{ACTION_URL}}\" method=\"POST\"><input name=\"password\"></form></body></html>",
 }));
 vi.mock("../templates/settings.html", () => ({
-  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}この設定はチャンネル画面にのみ適用されます。{{ERROR}}<form action=\"{{ACTION_URL}}\" method=\"POST\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\"><input name=\"textColor\" value=\"{{TEXT_COLOR}}\"><input name=\"surfaceColor\" value=\"{{SURFACE_COLOR}}\"><input name=\"surfaceAltColor\" value=\"{{SURFACE_ALT_COLOR}}\"><input name=\"accentColor\" value=\"{{ACCENT_COLOR}}\"><textarea name=\"extraCss\">{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form></body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}この設定はチャンネル画面にのみ適用されます。{{ERROR}}{{PRESET_CONTROLS}}<form action=\"{{ACTION_URL}}\" method=\"POST\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\">{{COLOR_FIELDS}}<textarea name=\"extraCss\">{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form>{{SETTINGS_SCRIPT}}</body></html>",
 }));
 
 import { IrcProxyDO } from "../irc-proxy";
@@ -281,6 +281,14 @@ describe("IrcProxyDO web log persistence", () => {
       surfaceColor: "#ABCDEF",
       surfaceAltColor: "#FEDCBA",
       accentColor: "#0F0F0F",
+      borderColor: "#654321",
+      usernameColor: "#AA5500",
+      timestampColor: "#00AA55",
+      highlightColor: "#998800",
+      buttonColor: "#001122",
+      buttonTextColor: "#F0F0F0",
+      selfColor: "#00CCFF",
+      mutedTextColor: "#666666",
       displayOrder: "asc",
       extraCss: "body { color: blue; }",
     } satisfies WebUiSettings);
@@ -315,6 +323,52 @@ describe("IrcProxyDO web log persistence", () => {
     expect(html).toContain("ADMIN_CSS");
     expect(html).not.toContain("font-size: 18px;");
     expect(html).toContain("/proxy/main/web/");
+    expect(html).toContain('name="borderColor"');
+    expect(html).toContain('value="#654321"');
+    expect(html).toContain('data-theme-preset="dark"');
+  });
+
+  it("fills missing theme fields from the light preset for legacy stored settings", async () => {
+    const state = new FakeState();
+    state.storage.seed(webUiSettingsStorageKey, {
+      fontFamily: "\"Fira Sans\", sans-serif",
+      fontSizePx: 18,
+      textColor: "#123456",
+      surfaceColor: "#ABCDEF",
+      surfaceAltColor: "#FEDCBA",
+      accentColor: "#0F0F0F",
+      displayOrder: "asc",
+      extraCss: "body { color: blue; }",
+    } satisfies Partial<WebUiSettings>);
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+
+    const loginResponse = await proxy.fetch(new Request("https://example.com/web/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "password=secret",
+    }));
+    const cookieHeader = loginResponse.headers.get("Set-Cookie")?.split(";")[0] ?? "";
+
+    const response = await proxy.fetch(new Request("https://example.com/web/settings", {
+      headers: {
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+    }));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain('name="borderColor"');
+    expect(html).toContain('value="#0B5FFF"');
+    expect(html).toContain('name="buttonTextColor"');
+    expect(html).toContain('value="#FFFFFF"');
   });
 
   it("persists web UI settings and applies them across list, channel, and login pages", async () => {
@@ -349,6 +403,14 @@ describe("IrcProxyDO web log persistence", () => {
         "surfaceColor=%23ABCDEF",
         "surfaceAltColor=%23FEDCBA",
         "accentColor=%230F0F0F",
+        "borderColor=%23654321",
+        "usernameColor=%23AA5500",
+        "timestampColor=%2300AA55",
+        "highlightColor=%23998800",
+        "buttonColor=%23001122",
+        "buttonTextColor=%23F0F0F0",
+        "selfColor=%2300CCFF",
+        "mutedTextColor=%23666666",
         "displayOrder=asc",
         "extraCss=body%20%7B%20color%3A%20blue%3B%20%7D",
       ].join("&"),
@@ -363,6 +425,14 @@ describe("IrcProxyDO web log persistence", () => {
       surfaceColor: "#ABCDEF",
       surfaceAltColor: "#FEDCBA",
       accentColor: "#0F0F0F",
+      borderColor: "#654321",
+      usernameColor: "#AA5500",
+      timestampColor: "#00AA55",
+      highlightColor: "#998800",
+      buttonColor: "#001122",
+      buttonTextColor: "#F0F0F0",
+      selfColor: "#00CCFF",
+      mutedTextColor: "#666666",
       displayOrder: "asc",
       extraCss: "body { color: blue; }",
     });
@@ -380,7 +450,7 @@ describe("IrcProxyDO web log persistence", () => {
       },
     }));
     const listHtml = await listPage.text();
-    expect(listHtml).toContain("Settings");
+    expect(listHtml).toContain("設定");
     expect(listHtml).toContain("ADMIN_CSS");
     expect(listHtml).not.toContain("font-size: 18px;");
     expect(listHtml).not.toContain("body { color: blue; }</style>");
@@ -393,9 +463,11 @@ describe("IrcProxyDO web log persistence", () => {
     }));
     const channelHtml = await channelPage.text();
     expect(channelHtml).toContain("padding-bottom:45px;");
-    expect(channelHtml).not.toContain("Reload");
+    expect(channelHtml).not.toContain("再読込");
     expect(channelHtml).toContain("body { color: blue; }");
-    expect(channelHtml).not.toContain("Settings");
+    expect(channelHtml).not.toContain("設定");
+    expect(channelHtml).toContain("--border-color: #654321;");
+    expect(channelHtml).toContain("--link-bg: rgba(15,15,15,0.2);");
 
     const loginPage = await proxy.fetch(new Request("https://example.com/web/login", {
       headers: { "X-Proxy-Prefix": "/proxy/main" },
@@ -431,12 +503,12 @@ describe("IrcProxyDO web log persistence", () => {
         Cookie: cookieHeader,
         "X-Proxy-Prefix": "/proxy/main",
       },
-      body: "fontFamily=test&fontSizePx=9&textColor=%23000000&surfaceColor=%23FFFFFF&surfaceAltColor=%23EEEEEE&accentColor=%230000FF&displayOrder=desc&extraCss=",
+      body: "fontFamily=test&fontSizePx=10&textColor=%23000000&surfaceColor=%23FFFFFF&surfaceAltColor=%23EEEEEE&accentColor=%230000FF&borderColor=blue&usernameColor=%23000011&timestampColor=%23000022&highlightColor=%23000033&buttonColor=%23000044&buttonTextColor=%23FFFFFF&selfColor=%23000055&mutedTextColor=%23666666&displayOrder=desc&extraCss=",
     }));
     const html = await response.text();
 
     expect(response.status).toBe(400);
-    expect(html).toContain("Font size は 10〜32 の整数で入力してください");
+    expect(html).toContain("borderColor は #RRGGBB 形式で入力してください");
     expect(state.storage.read(webUiSettingsStorageKey)).toBeUndefined();
   });
 

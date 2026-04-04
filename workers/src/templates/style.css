@@ -12,7 +12,6 @@
     --button-bg: #0B5FFF;
     --button-fg: #FFFFFF;
     --accent-self: #2E7D32;
-    --text-contrast-high: #000000;
     --text-contrast-low: #75715E;
   }
 }
@@ -22,7 +21,7 @@
     --rowcolor1: #2A2B2E;
     --textcolor: #F8F8F2;
     --accent-link: #A6E22E;
-    --link-bg: rgba(166,226,46,0.12);
+    --link-bg: rgba(166,226,46,0.30);
     --border-color: #2B8BF7;
     --accent-username: #F92672;
     --accent-timestamp: #AE81FF;
@@ -30,7 +29,6 @@
     --button-bg: #2B8BF7;
     --button-fg: #FFFFFF;
     --accent-self: #66D9EF;
-    --text-contrast-high: #FFFFFF;
     --text-contrast-low: #75715E;
   }
 }
@@ -81,18 +79,23 @@ input:focus { outline: none; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  flex: 0 0 44px;
-  width: 44px;
-  min-width: 44px;
+  flex: 0 0 72px;
+  width: 72px;
+  min-width: 72px;
   height: 40px;
   margin: 0;
-  padding: 0;
-  border: 1px solid var(--border-color);
+  padding: 0 10px;
+  border: none;
   border-radius: 0;
-  background-color: var(--rowcolor0);
-  color: var(--accent-link);
-  font-size: 1.15em;
+  background-color: var(--button-bg);
+  color: var(--button-fg);
+  font-size: 1em;
+  font-weight: bold;
   line-height: 1;
+  text-decoration: none;
+}
+.channel-list-link:hover,
+.channel-list-link:focus {
   text-decoration: none;
 }
 .message-input {

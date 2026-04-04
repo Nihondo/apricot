@@ -6,7 +6,7 @@
  *   - Channel list page
  *   - Per-channel message view with send form
  *   - Auto-refresh (30s)
- *   - Dark/light mode
+ *   - Full theme customization with preset restore
  *   - Message history with timestamps
  *   - IRC event logging (JOIN/PART/QUIT/NICK/TOPIC etc.)
  */
@@ -36,32 +36,84 @@ export interface StoredMessage {
 export type PersistedWebLogs = Record<string, StoredMessage[]>;
 export type WebDisplayOrder = "asc" | "desc";
 
-export interface WebUiSettings {
-  fontFamily: string;
-  fontSizePx: number;
+export interface WebUiColorSettings {
   textColor: string;
   surfaceColor: string;
   surfaceAltColor: string;
   accentColor: string;
+  borderColor: string;
+  usernameColor: string;
+  timestampColor: string;
+  highlightColor: string;
+  buttonColor: string;
+  buttonTextColor: string;
+  selfColor: string;
+  mutedTextColor: string;
+}
+
+export interface WebUiSettings extends WebUiColorSettings {
+  fontFamily: string;
+  fontSizePx: number;
   displayOrder: WebDisplayOrder;
   extraCss: string;
 }
 
 const DEFAULT_maxLines = 200;
 
-export const DEFAULT_WEB_UI_SETTINGS: WebUiSettings = {
-  fontFamily: "\"Hiragino Kaku Gothic ProN\", \"Noto Sans JP\", sans-serif",
-  fontSizePx: 16,
+export const LIGHT_WEB_UI_COLOR_PRESET: WebUiColorSettings = {
   textColor: "#000000",
   surfaceColor: "#FFFFFF",
   surfaceAltColor: "#EDF3FE",
   accentColor: "#0B5FFF",
+  borderColor: "#0B5FFF",
+  usernameColor: "#B00020",
+  timestampColor: "#5E35B1",
+  highlightColor: "#8A6D00",
+  buttonColor: "#0B5FFF",
+  buttonTextColor: "#FFFFFF",
+  selfColor: "#2E7D32",
+  mutedTextColor: "#75715E",
+};
+
+export const DARK_WEB_UI_COLOR_PRESET: WebUiColorSettings = {
+  textColor: "#F8F8F2",
+  surfaceColor: "#1F2023",
+  surfaceAltColor: "#2A2B2E",
+  accentColor: "#A6E22E",
+  borderColor: "#2B8BF7",
+  usernameColor: "#F92672",
+  timestampColor: "#AE81FF",
+  highlightColor: "#E6DB74",
+  buttonColor: "#2B8BF7",
+  buttonTextColor: "#FFFFFF",
+  selfColor: "#66D9EF",
+  mutedTextColor: "#75715E",
+};
+
+export const DEFAULT_WEB_UI_SETTINGS: WebUiSettings = {
+  fontFamily: "\"Hiragino Kaku Gothic ProN\", \"Noto Sans JP\", sans-serif",
+  fontSizePx: 16,
+  ...LIGHT_WEB_UI_COLOR_PRESET,
   displayOrder: "desc",
   extraCss: "",
 };
 
 type MessageBufferStore = Map<string, StoredMessage[]>;
 type PersistLogsCallback = (logs: PersistedWebLogs) => Promise<void>;
+const WEB_UI_COLOR_FIELDS = [
+  { name: "textColor", label: "文字色" },
+  { name: "surfaceColor", label: "背景色" },
+  { name: "surfaceAltColor", label: "交互背景色" },
+  { name: "accentColor", label: "アクセント色" },
+  { name: "borderColor", label: "枠線色" },
+  { name: "usernameColor", label: "ユーザー名色" },
+  { name: "timestampColor", label: "時刻色" },
+  { name: "highlightColor", label: "リンク強調色" },
+  { name: "buttonColor", label: "ボタン色" },
+  { name: "buttonTextColor", label: "ボタン文字色" },
+  { name: "selfColor", label: "自分の発言色" },
+  { name: "mutedTextColor", label: "補助文字色" },
+] as const satisfies ReadonlyArray<{ name: keyof WebUiColorSettings; label: string }>;
 
 /** Minimal interface for channel membership lookup (avoids circular import) */
 interface ChannelMembership {
@@ -85,6 +137,13 @@ function renderColorValue(color: string): string {
   return color.toUpperCase();
 }
 
+function buildLinkBackgroundColor(accentColor: string): string {
+  const red = Number.parseInt(accentColor.slice(1, 3), 16);
+  const green = Number.parseInt(accentColor.slice(3, 5), 16);
+  const blue = Number.parseInt(accentColor.slice(5, 7), 16);
+  return `rgba(${red},${green},${blue},0.2)`;
+}
+
 function renderSettingsError(errorMessage: string): string {
   return errorMessage
     ? `<div class="admin-message admin-message--danger" role="alert"><strong>設定を保存できませんでした。</strong><span>${escapeHtml(errorMessage)}</span></div>`
@@ -92,11 +151,11 @@ function renderSettingsError(errorMessage: string): string {
 }
 
 function renderLogoutForm(basePath: string): string {
-  return `<form action="${basePath}/logout" method="POST"><input type="submit" value="Logout" class="logout-button"></form>`;
+  return `<form action="${basePath}/logout" method="POST"><input type="submit" value="ログアウト" class="logout-button"></form>`;
 }
 
 function renderAdminLogoutForm(basePath: string): string {
-  return `<form action="${basePath}/logout" method="POST"><button type="submit" class="admin-button admin-button--subtle">Logout</button></form>`;
+  return `<form action="${basePath}/logout" method="POST"><button type="submit" class="admin-button admin-button--subtle">ログアウト</button></form>`;
 }
 
 /**
@@ -129,40 +188,78 @@ export function buildAdminCss(): string {
  * Builds the CSS string injected into the channel page.
  */
 export function buildChannelCss(settings: WebUiSettings): string {
-  const rootLines: string[] = [];
-  if (settings.surfaceColor !== DEFAULT_WEB_UI_SETTINGS.surfaceColor) {
-    rootLines.push(`--rowcolor0: ${settings.surfaceColor};`);
-  }
-  if (settings.surfaceAltColor !== DEFAULT_WEB_UI_SETTINGS.surfaceAltColor) {
-    rootLines.push(`--rowcolor1: ${settings.surfaceAltColor};`);
-  }
-  if (settings.textColor !== DEFAULT_WEB_UI_SETTINGS.textColor) {
-    rootLines.push(`--textcolor: ${settings.textColor};`);
-  }
-  if (settings.accentColor !== DEFAULT_WEB_UI_SETTINGS.accentColor) {
-    rootLines.push(`--accent-link: ${settings.accentColor};`);
-    rootLines.push(`--border-color: ${settings.accentColor};`);
-    rootLines.push(`--button-bg: ${settings.accentColor};`);
-  }
-
-  const typographyLines: string[] = [];
-  if (settings.fontFamily !== DEFAULT_WEB_UI_SETTINGS.fontFamily) {
-    typographyLines.push(`font-family: ${settings.fontFamily};`);
-  }
-  if (settings.fontSizePx !== DEFAULT_WEB_UI_SETTINGS.fontSizePx) {
-    typographyLines.push(`font-size: ${settings.fontSizePx}px;`);
-  }
-
-  const blocks: string[] = [];
-  if (rootLines.length > 0) {
-    blocks.push(`:root {\n  ${rootLines.join("\n  ")}\n}`);
-  }
-  if (typographyLines.length > 0) {
-    blocks.push(`body,\ninput,\nbutton,\ntextarea {\n  ${typographyLines.join("\n  ")}\n}`);
-  }
-
+  const rootLines = [
+    `--rowcolor0: ${settings.surfaceColor};`,
+    `--rowcolor1: ${settings.surfaceAltColor};`,
+    `--textcolor: ${settings.textColor};`,
+    `--accent-link: ${settings.accentColor};`,
+    `--link-bg: ${buildLinkBackgroundColor(settings.accentColor)};`,
+    `--border-color: ${settings.borderColor};`,
+    `--accent-username: ${settings.usernameColor};`,
+    `--accent-timestamp: ${settings.timestampColor};`,
+    `--accent-highlight: ${settings.highlightColor};`,
+    `--button-bg: ${settings.buttonColor};`,
+    `--button-fg: ${settings.buttonTextColor};`,
+    `--accent-self: ${settings.selfColor};`,
+    `--text-contrast-low: ${settings.mutedTextColor};`,
+  ];
+  const typographyLines = [
+    `font-family: ${settings.fontFamily};`,
+    `font-size: ${settings.fontSizePx}px;`,
+  ];
+  const blocks = [
+    `:root {\n  ${rootLines.join("\n  ")}\n}`,
+    `body,\ninput,\nbutton,\ntextarea {\n  ${typographyLines.join("\n  ")}\n}`,
+  ];
   const extraCss = settings.extraCss.trim();
   return [CSS, ...blocks, extraCss].filter(Boolean).join("\n\n");
+}
+
+function renderThemeColorFields(webUiSettings: WebUiSettings): string {
+  return WEB_UI_COLOR_FIELDS.map(({ name, label }) => (
+    `<label class="admin-field">
+      <span class="admin-field__label">${label}</span>
+      <input type="color" name="${name}" value="${renderColorValue(webUiSettings[name])}" class="admin-input admin-input--color" data-theme-color="${name}">
+    </label>`
+  )).join("\n");
+}
+
+function renderThemePresetControls(): string {
+  return `<div class="admin-message admin-message--info"><strong>配色プリセット</strong><span>ライト / ダークの配色へ戻せます。リンク背景色はアクセント色から自動生成されるため個別編集できません。</span></div>
+<div class="admin-form__actions">
+  <button type="button" class="admin-button admin-button--subtle" data-theme-preset="light">ライトに戻す</button>
+  <button type="button" class="admin-button admin-button--subtle" data-theme-preset="dark">ダークに戻す</button>
+</div>`;
+}
+
+function renderThemePresetScript(): string {
+  const lightPreset = JSON.stringify(LIGHT_WEB_UI_COLOR_PRESET);
+  const darkPreset = JSON.stringify(DARK_WEB_UI_COLOR_PRESET);
+
+  return `<script>
+window.addEventListener("DOMContentLoaded", function () {
+  var presets = {
+    light: ${lightPreset},
+    dark: ${darkPreset}
+  };
+  var presetButtons = document.querySelectorAll("[data-theme-preset]");
+  presetButtons.forEach(function (button) {
+    button.addEventListener("click", function () {
+      var presetName = button.getAttribute("data-theme-preset");
+      if (!presetName || !presets[presetName]) {
+        return;
+      }
+      var preset = presets[presetName];
+      Object.keys(preset).forEach(function (fieldName) {
+        var input = document.querySelector('[data-theme-color="' + fieldName + '"]');
+        if (input) {
+          input.value = preset[fieldName];
+        }
+      });
+    });
+  });
+});
+</script>`;
 }
 
 /**
@@ -245,43 +342,43 @@ export function buildChannelListPage(
   const joinForm = `
 <form action="${basePath}/join" method="POST" class="admin-inline-form">
   <input type="text" name="channel" placeholder="#channel" class="admin-input" autocomplete="off">
-  <button type="submit" class="admin-button admin-button--primary">Join channel</button>
+  <button type="submit" class="admin-button admin-button--primary">チャンネルに参加</button>
 </form>`;
   const chLinks = (channels.length === 0
-    ? `<div class="admin-empty-state"><h3>No channels joined</h3><p>JOIN 済みチャンネルはここに表示されます。下のフォームから参加できます。</p></div>`
+    ? `<div class="admin-empty-state"><h3>参加中のチャンネルはありません</h3><p>JOIN 済みチャンネルはここに表示されます。下のフォームから参加できます。</p></div>`
     : channels
         .map((ch) => `
 <div class="admin-list-item">
   <a href="${basePath}/${encodeURIComponent(ch)}" class="admin-list-item__link">
     <span class="admin-list-item__title">${escapeHtml(ch)}</span>
-    <span class="admin-list-item__meta">Open channel view</span>
+    <span class="admin-list-item__meta">チャンネル画面を開く</span>
   </a>
   <form action="${basePath}/leave" method="POST">
     <input type="hidden" name="channel" value="${escapeHtml(ch)}">
-    <button type="submit" class="admin-button admin-button--danger">Leave</button>
+    <button type="submit" class="admin-button admin-button--danger">離脱</button>
   </form>
 </div>`)
         .join("\n")) + `\n${joinForm}`;
   const actionParts: string[] = [];
   if (showSettings) {
-    actionParts.push(`<a href="${basePath}/settings" class="admin-button admin-button--subtle">Settings</a>`);
+    actionParts.push(`<a href="${basePath}/settings" class="admin-button admin-button--subtle">設定</a>`);
   }
   if (showLogout) {
     actionParts.push(renderAdminLogoutForm(basePath));
   }
   const statusClass = connected ? "admin-status-badge--success" : "admin-status-badge--danger";
-  const statusText = connected ? "Connected" : "Disconnected";
+  const statusText = connected ? "接続中" : "切断中";
   const channelCountText = channels.length === 0
     ? "参加中チャンネルはありません"
-    : `${channels.length} channel${channels.length === 1 ? "" : "s"} joined`;
+    : `${channels.length} 件のチャンネルに参加中`;
 
   return CHANNEL_LIST_TEMPLATE
     .replace("{{CSS}}", buildAdminCss())
     .replace("{{STATUS_CLASS}}", statusClass)
     .replace("{{STATUS_TEXT}}", statusText)
     .replace("{{STATUS_ICON}}", connected ? "&#x1f7e2;" : "&#x1f534;")
-    .replace("{{NICK}}", escapeHtml(nick))
-    .replace("{{SERVER_NAME}}", escapeHtml(serverName))
+    .split("{{NICK}}").join(escapeHtml(nick))
+    .split("{{SERVER_NAME}}").join(escapeHtml(serverName))
     .replace("{{CHANNEL_COUNT}}", escapeHtml(channelCountText))
     .replace("{{TOP_ACTIONS}}", actionParts.join(""))
     .replace("{{CHANNEL_LINKS}}", chLinks);
@@ -298,8 +395,11 @@ export function buildSettingsPage(
   errorMessage = ""
 ): string {
   const isAscendingOrder = webUiSettings.displayOrder === "asc";
-  const topActionsHtml = `<a href="${basePath}/" class="admin-button admin-button--subtle">Back to channels</a>${renderAdminLogoutForm(basePath)}`;
+  const topActionsHtml = `<a href="${basePath}/" class="admin-button admin-button--subtle">チャンネル一覧へ戻る</a>${renderAdminLogoutForm(basePath)}`;
   const errorHtml = renderSettingsError(errorMessage);
+  const colorFieldsHtml = renderThemeColorFields(webUiSettings);
+  const presetControlsHtml = renderThemePresetControls();
+  const settingsScript = renderThemePresetScript();
 
   return SETTINGS_TEMPLATE
     .replace("{{CSS}}", buildAdminCss())
@@ -308,15 +408,14 @@ export function buildSettingsPage(
     .replace("{{TOP_ACTIONS}}", topActionsHtml)
     .replace("{{ERROR}}", errorHtml)
     .replace("{{ACTION_URL}}", `${basePath}/settings`)
+    .replace("{{PRESET_CONTROLS}}", presetControlsHtml)
     .replace("{{FONT_FAMILY}}", escapeHtml(webUiSettings.fontFamily))
     .replace("{{FONT_SIZE_PX}}", String(webUiSettings.fontSizePx))
-    .replace("{{TEXT_COLOR}}", renderColorValue(webUiSettings.textColor))
-    .replace("{{SURFACE_COLOR}}", renderColorValue(webUiSettings.surfaceColor))
-    .replace("{{SURFACE_ALT_COLOR}}", renderColorValue(webUiSettings.surfaceAltColor))
-    .replace("{{ACCENT_COLOR}}", renderColorValue(webUiSettings.accentColor))
+    .replace("{{COLOR_FIELDS}}", colorFieldsHtml)
     .replace("{{DISPLAY_ORDER_ASC_CHECKED}}", isAscendingOrder ? "checked" : "")
     .replace("{{DISPLAY_ORDER_DESC_CHECKED}}", isAscendingOrder ? "" : "checked")
-    .replace("{{EXTRA_CSS}}", escapeHtml(webUiSettings.extraCss));
+    .replace("{{EXTRA_CSS}}", escapeHtml(webUiSettings.extraCss))
+    .replace("{{SETTINGS_SCRIPT}}", settingsScript);
 }
 
 // ---------------------------------------------------------------------------
@@ -489,10 +588,10 @@ export function createWebModule(
       .join("\n");
 
     const actionUrl = `${basePath}/${encodeURIComponent(channel)}`;
-    const channelListLink = `<a href="${basePath}/" class="channel-list-link" aria-label="Back to channels" title="Back to channels">☰</a>`;
+    const channelListLink = `<a href="${basePath}/" class="channel-list-link" aria-label="チャンネル一覧へ戻る" title="チャンネル一覧へ戻る">一覧</a>`;
     const inputBarPosition = webUiSettings.displayOrder === "asc" ? "bottom" : "top";
     const reloadButton = webUiSettings.displayOrder === "desc"
-      ? '<button type="button" class="floating" onclick="location.reload();">Reload</button>'
+      ? '<button type="button" class="floating" onclick="location.reload();">再読込</button>'
       : "";
     const contentPadding = webUiSettings.displayOrder === "asc" ? "padding-bottom:45px;" : "padding-top:45px;";
 

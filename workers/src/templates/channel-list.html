@@ -7,11 +7,11 @@
 </head><body class="admin-page">
 <div class="admin-shell">
   <header class="admin-page-header">
-    <div class="admin-page-header__eyebrow">Web UI</div>
+    <div class="admin-page-header__eyebrow">ウェブUI</div>
     <div class="admin-page-header__row">
       <div class="admin-page-header__copy">
-        <h1 class="admin-page-title">Channels</h1>
-        <p class="admin-page-description">{{NICK}} on {{SERVER_NAME}} の参加チャンネル一覧です。</p>
+        <h1 class="admin-page-title">チャンネル一覧</h1>
+        <p class="admin-page-description">{{SERVER_NAME}} に {{NICK}} として参加しているチャンネル一覧です。</p>
       </div>
       <div class="admin-action-bar">
         {{TOP_ACTIONS}}
@@ -19,15 +19,15 @@
     </div>
     <div class="admin-meta-row">
       <span class="admin-status-badge {{STATUS_CLASS}}">{{STATUS_ICON}} {{STATUS_TEXT}}</span>
-      <span class="admin-meta-chip">Server: {{SERVER_NAME}}</span>
-      <span class="admin-meta-chip">Nick: {{NICK}}</span>
+      <span class="admin-meta-chip">サーバー: {{SERVER_NAME}}</span>
+      <span class="admin-meta-chip">ニック: {{NICK}}</span>
     </div>
   </header>
 
   <section class="admin-panel">
     <div class="admin-panel__header">
       <div>
-        <h2 class="admin-section-title">Joined channels</h2>
+        <h2 class="admin-section-title">参加中チャンネル</h2>
         <p class="admin-section-description">{{CHANNEL_COUNT}}</p>
       </div>
     </div>

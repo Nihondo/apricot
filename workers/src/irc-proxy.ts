@@ -17,8 +17,10 @@ import {
   buildWebUiSettings,
   createWebModule,
   DEFAULT_WEB_UI_SETTINGS,
+  LIGHT_WEB_UI_COLOR_PRESET,
   isWebDisplayOrder,
   type PersistedWebLogs,
+  type WebUiColorSettings,
   type WebUiSettings,
 } from "./modules/web";
 import { extractUrlMetadata } from "./modules/url-metadata";
@@ -30,6 +32,20 @@ const webLogsStorageKey = "web:logs:v1";
 const webUiSettingsStorageKey = "web:ui-settings:v1";
 const webAuthCookieName = "apricot_web_auth";
 const nickErrorCodes = new Set(["431", "432", "433", "436", "437", "438", "447", "484", "485"]);
+const webUiColorFieldNames: Array<keyof WebUiColorSettings> = [
+  "textColor",
+  "surfaceColor",
+  "surfaceAltColor",
+  "accentColor",
+  "borderColor",
+  "usernameColor",
+  "timestampColor",
+  "highlightColor",
+  "buttonColor",
+  "buttonTextColor",
+  "selfColor",
+  "mutedTextColor",
+];
 
 export class IrcProxyDO implements DurableObject {
   private state: DurableObjectState;
@@ -1067,64 +1083,57 @@ export class IrcProxyDO implements DurableObject {
     settings: WebUiSettings;
     errorMessage?: string;
   } {
+    const draftSettings: WebUiSettings = { ...this.webUiSettings };
     const fontFamily = (formData.get("fontFamily") as string | null)?.trim() ?? "";
     if (!fontFamily || fontFamily.length > 200) {
       return {
-        settings: { ...this.webUiSettings, fontFamily: fontFamily || this.webUiSettings.fontFamily },
+        settings: { ...draftSettings, fontFamily: fontFamily || draftSettings.fontFamily },
         errorMessage: "Font family は 1〜200 文字で入力してください",
       };
     }
+    draftSettings.fontFamily = fontFamily;
 
     const fontSizeRaw = (formData.get("fontSizePx") as string | null)?.trim() ?? "";
     const fontSizePx = Number.parseInt(fontSizeRaw, 10);
     if (!Number.isInteger(fontSizePx) || fontSizePx < 10 || fontSizePx > 32) {
       return {
-        settings: { ...this.webUiSettings },
+        settings: { ...draftSettings },
         errorMessage: "Font size は 10〜32 の整数で入力してください",
       };
     }
+    draftSettings.fontSizePx = fontSizePx;
 
-    const textColor = (formData.get("textColor") as string | null)?.trim() ?? "";
-    const surfaceColor = (formData.get("surfaceColor") as string | null)?.trim() ?? "";
-    const surfaceAltColor = (formData.get("surfaceAltColor") as string | null)?.trim() ?? "";
-    const accentColor = (formData.get("accentColor") as string | null)?.trim() ?? "";
-    const colors = { textColor, surfaceColor, surfaceAltColor, accentColor } satisfies Record<string, string>;
-    for (const [fieldName, value] of Object.entries(colors)) {
-      if (!/^#[0-9A-Fa-f]{6}$/.test(value)) {
+    for (const fieldName of webUiColorFieldNames) {
+      const colorValue = (formData.get(fieldName) as string | null)?.trim() ?? "";
+      if (!/^#[0-9A-Fa-f]{6}$/.test(colorValue)) {
         return {
-          settings: { ...this.webUiSettings },
+          settings: { ...draftSettings },
           errorMessage: `${fieldName} は #RRGGBB 形式で入力してください`,
         };
       }
+      draftSettings[fieldName] = colorValue;
     }
 
     const displayOrder = (formData.get("displayOrder") as string | null)?.trim() ?? "";
     if (!isWebDisplayOrder(displayOrder)) {
       return {
-        settings: { ...this.webUiSettings },
+        settings: { ...draftSettings },
         errorMessage: "Display order は asc または desc を指定してください",
       };
     }
+    draftSettings.displayOrder = displayOrder;
 
     const extraCss = (formData.get("extraCss") as string | null) ?? "";
+    draftSettings.extraCss = extraCss;
     if (extraCss.length > 10_240) {
       return {
-        settings: { ...this.webUiSettings, fontFamily, fontSizePx, textColor, surfaceColor, surfaceAltColor, accentColor, displayOrder, extraCss },
+        settings: { ...draftSettings },
         errorMessage: "Extra CSS は 10KB 以下にしてください",
       };
     }
 
     return {
-      settings: buildWebUiSettings({
-        fontFamily,
-        fontSizePx,
-        textColor,
-        surfaceColor,
-        surfaceAltColor,
-        accentColor,
-        displayOrder,
-        extraCss,
-      }),
+      settings: buildWebUiSettings(draftSettings),
     };
   }
 
@@ -1152,10 +1161,18 @@ export class IrcProxyDO implements DurableObject {
     return buildWebUiSettings({
       fontFamily,
       fontSizePx,
-      textColor: isValidColor(stored.textColor) ? stored.textColor : DEFAULT_WEB_UI_SETTINGS.textColor,
-      surfaceColor: isValidColor(stored.surfaceColor) ? stored.surfaceColor : DEFAULT_WEB_UI_SETTINGS.surfaceColor,
-      surfaceAltColor: isValidColor(stored.surfaceAltColor) ? stored.surfaceAltColor : DEFAULT_WEB_UI_SETTINGS.surfaceAltColor,
-      accentColor: isValidColor(stored.accentColor) ? stored.accentColor : DEFAULT_WEB_UI_SETTINGS.accentColor,
+      textColor: isValidColor(stored.textColor) ? stored.textColor : LIGHT_WEB_UI_COLOR_PRESET.textColor,
+      surfaceColor: isValidColor(stored.surfaceColor) ? stored.surfaceColor : LIGHT_WEB_UI_COLOR_PRESET.surfaceColor,
+      surfaceAltColor: isValidColor(stored.surfaceAltColor) ? stored.surfaceAltColor : LIGHT_WEB_UI_COLOR_PRESET.surfaceAltColor,
+      accentColor: isValidColor(stored.accentColor) ? stored.accentColor : LIGHT_WEB_UI_COLOR_PRESET.accentColor,
+      borderColor: isValidColor(stored.borderColor) ? stored.borderColor : LIGHT_WEB_UI_COLOR_PRESET.borderColor,
+      usernameColor: isValidColor(stored.usernameColor) ? stored.usernameColor : LIGHT_WEB_UI_COLOR_PRESET.usernameColor,
+      timestampColor: isValidColor(stored.timestampColor) ? stored.timestampColor : LIGHT_WEB_UI_COLOR_PRESET.timestampColor,
+      highlightColor: isValidColor(stored.highlightColor) ? stored.highlightColor : LIGHT_WEB_UI_COLOR_PRESET.highlightColor,
+      buttonColor: isValidColor(stored.buttonColor) ? stored.buttonColor : LIGHT_WEB_UI_COLOR_PRESET.buttonColor,
+      buttonTextColor: isValidColor(stored.buttonTextColor) ? stored.buttonTextColor : LIGHT_WEB_UI_COLOR_PRESET.buttonTextColor,
+      selfColor: isValidColor(stored.selfColor) ? stored.selfColor : LIGHT_WEB_UI_COLOR_PRESET.selfColor,
+      mutedTextColor: isValidColor(stored.mutedTextColor) ? stored.mutedTextColor : LIGHT_WEB_UI_COLOR_PRESET.mutedTextColor,
       displayOrder,
       extraCss,
     });

@@ -7,11 +7,11 @@
 </head><body class="admin-page">
 <div class="admin-shell">
   <header class="admin-page-header">
-    <div class="admin-page-header__eyebrow">Web UI</div>
+    <div class="admin-page-header__eyebrow">ウェブUI</div>
     <div class="admin-page-header__row">
       <div class="admin-page-header__copy">
-        <h1 class="admin-page-title">Channel view settings</h1>
-        <p class="admin-page-description">{{NICK}} on {{SERVER_NAME}} のチャンネル画面に適用する表示設定です。</p>
+        <h1 class="admin-page-title">チャンネル画面の設定</h1>
+        <p class="admin-page-description">{{SERVER_NAME}} のチャンネル画面に {{NICK}} 用として適用する表示設定です。</p>
       </div>
       <div class="admin-action-bar">
         {{TOP_ACTIONS}}
@@ -28,50 +28,37 @@
   <section class="admin-panel">
     <div class="admin-panel__header">
       <div>
-        <h2 class="admin-section-title">Visual customization</h2>
-        <p class="admin-section-description">フォント、色、表示順、追加CSSを保存します。</p>
+        <h2 class="admin-section-title">表示カスタマイズ</h2>
+        <p class="admin-section-description">フォント、単一テーマ配色、表示順、追加CSSを保存します。</p>
       </div>
     </div>
     <form action="{{ACTION_URL}}" method="POST" class="admin-form">
+      {{PRESET_CONTROLS}}
       <label class="admin-field">
-        <span class="admin-field__label">Font family</span>
+        <span class="admin-field__label">フォントファミリー</span>
         <input type="text" name="fontFamily" value="{{FONT_FAMILY}}" class="admin-input" maxlength="200">
       </label>
       <label class="admin-field">
-        <span class="admin-field__label">Font size (px)</span>
+        <span class="admin-field__label">文字サイズ (px)</span>
         <input type="number" name="fontSizePx" value="{{FONT_SIZE_PX}}" min="10" max="32" class="admin-input">
       </label>
       <div class="admin-grid admin-grid--three">
-        <label class="admin-field">
-          <span class="admin-field__label">Text color</span>
-          <input type="color" name="textColor" value="{{TEXT_COLOR}}" class="admin-input admin-input--color">
-        </label>
-        <label class="admin-field">
-          <span class="admin-field__label">Background color</span>
-          <input type="color" name="surfaceColor" value="{{SURFACE_COLOR}}" class="admin-input admin-input--color">
-        </label>
-        <label class="admin-field">
-          <span class="admin-field__label">Alt background color</span>
-          <input type="color" name="surfaceAltColor" value="{{SURFACE_ALT_COLOR}}" class="admin-input admin-input--color">
-        </label>
+        {{COLOR_FIELDS}}
       </div>
-      <label class="admin-field">
-        <span class="admin-field__label">Accent color</span>
-        <input type="color" name="accentColor" value="{{ACCENT_COLOR}}" class="admin-input admin-input--color">
-      </label>
       <fieldset class="admin-fieldset">
-        <legend class="admin-field__label">Display order</legend>
+        <legend class="admin-field__label">表示順</legend>
         <label class="admin-radio-option"><input type="radio" name="displayOrder" value="asc" {{DISPLAY_ORDER_ASC_CHECKED}}> 古い順</label>
         <label class="admin-radio-option"><input type="radio" name="displayOrder" value="desc" {{DISPLAY_ORDER_DESC_CHECKED}}> 新しい順</label>
       </fieldset>
       <label class="admin-field">
-        <span class="admin-field__label">Extra CSS</span>
+        <span class="admin-field__label">追加CSS</span>
         <textarea name="extraCss" rows="12" class="admin-textarea">{{EXTRA_CSS}}</textarea>
       </label>
       <div class="admin-form__actions">
-        <button type="submit" class="admin-button admin-button--primary">Save settings</button>
+        <button type="submit" class="admin-button admin-button--primary">設定を保存</button>
       </div>
     </form>
   </section>
 </div>
+{{SETTINGS_SCRIPT}}
 </body></html>

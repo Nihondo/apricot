@@ -7,15 +7,16 @@ vi.mock("../templates/channel.html", () => ({
   default: "<html><body>{{INPUT_BAR_POSITION}}{{CHANNEL_LIST_LINK}}{{RELOAD_BUTTON}}{{CONTENT_PADDING}}<h1>{{CHANNEL}}</h1><div>{{TOPIC}}</div><form action=\"{{ACTION_URL}}\"></form>{{MESSAGES}}</body></html>",
 }));
 vi.mock("../templates/channel-list.html", () => ({
-  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}<p>{{SERVER_NAME}} に {{NICK}} として参加</p><div>{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</div><span>サーバー: {{SERVER_NAME}}</span><span>ニック: {{NICK}}</span></body></html>",
 }));
 vi.mock("../templates/settings.html", () => ({
-  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{ERROR}}この設定はチャンネル画面にのみ適用されます。<form action=\"{{ACTION_URL}}\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><textarea>{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form></body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{ERROR}}この設定はチャンネル画面にのみ適用されます。{{PRESET_CONTROLS}}<form action=\"{{ACTION_URL}}\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\">{{COLOR_FIELDS}}<textarea>{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form>{{SETTINGS_SCRIPT}}</body></html>",
 }));
 
 import {
   buildAdminCss,
   buildChannelCss,
+  buildChannelListPage,
   buildSettingsPage,
   buildWebUiSettings,
   createWebModule,
@@ -125,8 +126,8 @@ describe("createWebModule", () => {
     expect(secondIdx).toBeLessThan(firstIdx); // 新しい順（secondが上）
     expect(html).toContain("top");
     expect(html).toContain('href="/proxy/main/web/"');
-    expect(html).toContain("☰");
-    expect(html).toContain("Reload");
+    expect(html).toContain("一覧");
+    expect(html).toContain("再読込");
     expect(html).toContain("padding-top:45px;");
   });
 
@@ -158,8 +159,8 @@ describe("createWebModule", () => {
     expect(firstIdx).toBeLessThan(secondIdx); // 古い順（firstが上）
     expect(html).toContain("bottom");
     expect(html).toContain('href="/proxy/main/web/"');
-    expect(html).toContain("☰");
-    expect(html).not.toContain("Reload");
+    expect(html).toContain("一覧");
+    expect(html).not.toContain("再読込");
     expect(html).toContain("padding-bottom:45px;");
   });
 
@@ -189,18 +190,47 @@ describe("createWebModule", () => {
       textColor: "#123456",
       surfaceColor: "#ABCDEF",
       surfaceAltColor: "#FEDCBA",
-      accentColor: "#0F0F0F",
+      accentColor: "#A6E22E",
+      borderColor: "#0F0F0F",
+      usernameColor: "#AA5500",
+      timestampColor: "#00AA55",
+      highlightColor: "#998800",
+      buttonColor: "#001122",
+      buttonTextColor: "#F0F0F0",
+      selfColor: "#00CCFF",
+      mutedTextColor: "#666666",
       extraCss: ".custom { color: red; }",
     }));
 
     expect(css).toContain("font-family: \"Fira Sans\", sans-serif;");
     expect(css).toContain("font-size: 18px;");
     expect(css).toContain("--textcolor: #123456;");
+    expect(css).toContain("--border-color: #0F0F0F;");
+    expect(css).toContain("--button-bg: #001122;");
+    expect(css).toContain("--button-fg: #F0F0F0;");
+    expect(css).toContain("--text-contrast-low: #666666;");
+    expect(css).toContain("--link-bg: rgba(166,226,46,0.2);");
     expect(css).toContain(".custom { color: red; }");
   });
 
   it("builds fixed admin CSS separately from channel customization", () => {
     expect(buildAdminCss()).toBe("ADMIN_CSS");
+  });
+
+  it("builds the channel list page with repeated nick and server placeholders replaced", () => {
+    const html = buildChannelListPage(
+      ["#general"],
+      "apricot",
+      "irc.example.com",
+      true,
+      "/proxy/main/web"
+    );
+
+    expect(html).toContain("irc.example.com に apricot として参加");
+    expect(html).toContain("サーバー: irc.example.com");
+    expect(html).toContain("ニック: apricot");
+    expect(html).not.toContain("{{SERVER_NAME}}");
+    expect(html).not.toContain("{{NICK}}");
   });
 
   it("builds the settings page with current values and error text", () => {
@@ -216,6 +246,12 @@ describe("createWebModule", () => {
     expect(html).toContain("body { color: blue; }");
     expect(html).toContain("この設定はチャンネル画面にのみ適用されます。");
     expect(html).toContain("入力エラー");
+    expect(html).toContain('name="borderColor"');
+    expect(html).toContain('name="mutedTextColor"');
+    expect(html).toContain("ライトに戻す");
+    expect(html).toContain("ダークに戻す");
+    expect(html).toContain("リンク背景色はアクセント色から自動生成される");
+    expect(html).toContain('"borderColor":"#0B5FFF"');
     expect(html).toContain("checked");
     expect(html).toContain("ADMIN_CSS");
   });
