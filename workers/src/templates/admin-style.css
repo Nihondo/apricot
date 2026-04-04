@@ -220,8 +220,8 @@
   gap: 16px;
 }
 
-.admin-grid--three {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+.admin-grid--list {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
 }
 
 .admin-field {
@@ -357,7 +357,7 @@
   }
 
   .admin-inline-form,
-  .admin-grid--three,
+  .admin-grid--list,
   .admin-list-item {
     grid-template-columns: 1fr;
   }

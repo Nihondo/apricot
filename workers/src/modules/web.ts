@@ -111,18 +111,18 @@ type MessageBufferStore = Map<string, StoredMessage[]>;
 type PersistLogsCallback = (logs: PersistedWebLogs) => Promise<void>;
 const WEB_UI_COLOR_FIELDS = [
   { name: "textColor", label: "文字色" },
-  { name: "surfaceColor", label: "背景色" },
-  { name: "surfaceAltColor", label: "交互背景色" },
-  { name: "accentColor", label: "アクセント色" },
-  { name: "borderColor", label: "枠線色" },
-  { name: "usernameColor", label: "ユーザー名色" },
-  { name: "timestampColor", label: "時刻色" },
-  { name: "highlightColor", label: "リンク強調色" },
-  { name: "buttonColor", label: "ボタン色" },
-  { name: "buttonTextColor", label: "ボタン文字色" },
-  { name: "selfColor", label: "自分の発言色" },
-  { name: "mutedTextColor", label: "補助文字色" },
-  { name: "keywordColor", label: "キーワード強調色" },
+  { name: "surfaceColor", label: "背景色1" },
+  { name: "surfaceAltColor", label: "背景色2" },
+  { name: "accentColor", label: "リンク" },
+  { name: "highlightColor", label: "リンク行" },
+  { name: "keywordColor", label: "キーワード" },
+  { name: "timestampColor", label: "時刻" },
+  { name: "selfColor", label: "自ユーザ名" },
+  { name: "usernameColor", label: "他ユーザ名" },
+  { name: "buttonColor", label: "ボタン" },
+  { name: "buttonTextColor", label: "ボタン文字" },
+  { name: "borderColor", label: "枠線" },
+  { name: "mutedTextColor", label: "控えめ表示行" },
 ] as const satisfies ReadonlyArray<{ name: keyof WebUiColorSettings; label: string }>;
 
 /** Minimal interface for channel membership lookup (avoids circular import) */
@@ -238,10 +238,10 @@ function renderThemeColorFields(webUiSettings: WebUiSettings): string {
 }
 
 function renderThemePresetControls(): string {
-  return `<div class="admin-message admin-message--info"><strong>配色プリセット</strong><span>ライト / ダークの配色へ戻せます。リンク背景色はアクセント色から自動生成されるため個別編集できません。</span></div>
-<div class="admin-form__actions">
-  <button type="button" class="admin-button admin-button--subtle" data-theme-preset="light">ライトに戻す</button>
-  <button type="button" class="admin-button admin-button--subtle" data-theme-preset="dark">ダークに戻す</button>
+  return `<div class="admin-message admin-message--info" style="display:flex; align-items: center;"><strong>配色プリセット</strong></div>
+<div class="admin-form__actions" style="margin-left: auto;">
+  <button type="button" class="admin-button admin-button--subtle" data-theme-preset="light">ライト</button>
+  <button type="button" class="admin-button admin-button--subtle" data-theme-preset="dark">ダーク</button>
 </div>`;
 }
 
@@ -397,7 +397,7 @@ export function buildChannelListPage(
   </a>
   <form action="${basePath}/leave" method="POST">
     <input type="hidden" name="channel" value="${escapeHtml(ch)}">
-    <button type="submit" class="admin-button admin-button--danger">離脱</button>
+    <button type="submit" class="admin-button admin-button--danger">チャンネルから離脱</button>
   </form>
 </div>`)
         .join("\n")) + `\n${joinForm}`;

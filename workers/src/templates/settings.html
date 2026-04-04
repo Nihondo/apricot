@@ -7,7 +7,7 @@
 </head><body class="admin-page">
 <div class="admin-shell">
   <header class="admin-page-header">
-    <div class="admin-page-header__eyebrow">ウェブUI</div>
+    <div class="admin-page-header__eyebrow">WebUI</div>
     <div class="admin-page-header__row">
       <div class="admin-page-header__copy">
         <h1 class="admin-page-title">チャンネル画面の設定</h1>
@@ -19,19 +19,21 @@
     </div>
   </header>
 
-  <div class="admin-message admin-message--info">
-    <strong>この設定はチャンネル画面にのみ適用されます。</strong>
-    <span>チャンネル一覧、設定画面、ログイン画面は固定のモダンUIで表示されます。</span>
-  </div>
   {{ERROR}}
 
   <section class="admin-panel">
     <div class="admin-panel__header">
       <div>
         <h2 class="admin-section-title">表示カスタマイズ</h2>
-        <p class="admin-section-description">フォント、単一テーマ配色、表示順、追加CSSを保存します。</p>
+        <p class="admin-section-description">フォント、テーマ配色、表示順、キーワード、追加CSSを保存します。</p>
       </div>
     </div>
+
+    <div class="admin-message admin-message--info">
+      <strong>この設定はチャンネル画面にのみ適用されます。</strong>
+      <span>チャンネル一覧、設定画面、ログイン画面は固定の配色で表示されます。</span>
+    </div>
+
     <form action="{{ACTION_URL}}" method="POST" class="admin-form">
       {{PRESET_CONTROLS}}
       <label class="admin-field">
@@ -42,7 +44,7 @@
         <span class="admin-field__label">文字サイズ (px)</span>
         <input type="number" name="fontSizePx" value="{{FONT_SIZE_PX}}" min="10" max="32" class="admin-input">
       </label>
-      <div class="admin-grid admin-grid--three">
+      <div class="admin-grid admin-grid--list">
         {{COLOR_FIELDS}}
       </div>
       <fieldset class="admin-fieldset">
@@ -51,11 +53,11 @@
         <label class="admin-radio-option"><input type="radio" name="displayOrder" value="desc" {{DISPLAY_ORDER_DESC_CHECKED}}> 新しい順</label>
       </fieldset>
       <label class="admin-field">
-        <span class="admin-field__label">キーワード強調 (1行に1語)</span>
+        <span class="admin-field__label">強調したいキーワード (1行に1語)</span>
         <textarea name="highlightKeywords" rows="4" class="admin-textarea" placeholder="強調したいキーワードを1行に1つ入力">{{HIGHLIGHT_KEYWORDS}}</textarea>
       </label>
       <label class="admin-field">
-        <span class="admin-field__label">キーワードDIM (1行に1語)</span>
+        <span class="admin-field__label">控えめ表示キーワード (1行に1語)</span>
         <textarea name="dimKeywords" rows="4" class="admin-textarea" placeholder="目立たなくしたい行のキーワードを1行に1つ入力">{{DIM_KEYWORDS}}</textarea>
       </label>
       <label class="admin-field">
