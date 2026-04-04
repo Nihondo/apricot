@@ -51,6 +51,14 @@
         <label class="admin-radio-option"><input type="radio" name="displayOrder" value="desc" {{DISPLAY_ORDER_DESC_CHECKED}}> 新しい順</label>
       </fieldset>
       <label class="admin-field">
+        <span class="admin-field__label">キーワード強調 (1行に1語)</span>
+        <textarea name="highlightKeywords" rows="4" class="admin-textarea" placeholder="強調したいキーワードを1行に1つ入力">{{HIGHLIGHT_KEYWORDS}}</textarea>
+      </label>
+      <label class="admin-field">
+        <span class="admin-field__label">キーワードDIM (1行に1語)</span>
+        <textarea name="dimKeywords" rows="4" class="admin-textarea" placeholder="目立たなくしたい行のキーワードを1行に1つ入力">{{DIM_KEYWORDS}}</textarea>
+      </label>
+      <label class="admin-field">
         <span class="admin-field__label">追加CSS</span>
         <textarea name="extraCss" rows="12" class="admin-textarea">{{EXTRA_CSS}}</textarea>
       </label>

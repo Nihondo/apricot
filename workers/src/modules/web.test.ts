@@ -16,7 +16,7 @@ vi.mock("../templates/channel-list.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}<p>{{SERVER_NAME}} に {{NICK}} として参加</p>{{FLASH_MESSAGE}}{{NICK_FORM}}<div>{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</div><span>サーバー: {{SERVER_NAME}}</span><span>NICK: {{NICK}}</span></body></html>",
 }));
 vi.mock("../templates/settings.html", () => ({
-  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{ERROR}}この設定はチャンネル画面にのみ適用されます。{{PRESET_CONTROLS}}<form action=\"{{ACTION_URL}}\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\">{{COLOR_FIELDS}}<textarea>{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form>{{SETTINGS_SCRIPT}}</body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{ERROR}}この設定はチャンネル画面にのみ適用されます。{{PRESET_CONTROLS}}<form action=\"{{ACTION_URL}}\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\">{{COLOR_FIELDS}}<textarea name=\"highlightKeywords\">{{HIGHLIGHT_KEYWORDS}}</textarea><textarea name=\"dimKeywords\">{{DIM_KEYWORDS}}</textarea><textarea>{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form>{{SETTINGS_SCRIPT}}</body></html>",
 }));
 
 import {
@@ -250,6 +250,7 @@ describe("createWebModule", () => {
       buttonTextColor: "#F0F0F0",
       selfColor: "#00CCFF",
       mutedTextColor: "#666666",
+      keywordColor: "#FF4400",
       extraCss: ".custom { color: red; }",
     }));
 
@@ -261,6 +262,7 @@ describe("createWebModule", () => {
     expect(css).toContain("--button-fg: #F0F0F0;");
     expect(css).toContain("--text-contrast-low: #666666;");
     expect(css).toContain("--link-bg: rgba(166,226,46,0.2);");
+    expect(css).toContain("--accent-keyword: #FF4400;");
     expect(css).toContain(".custom { color: red; }");
   });
 
@@ -321,11 +323,130 @@ describe("createWebModule", () => {
     expect(html).toContain("入力エラー");
     expect(html).toContain('name="borderColor"');
     expect(html).toContain('name="mutedTextColor"');
+    expect(html).toContain('name="keywordColor"');
+    expect(html).toContain('name="highlightKeywords"');
+    expect(html).toContain('name="dimKeywords"');
     expect(html).toContain("ライトに戻す");
     expect(html).toContain("ダークに戻す");
     expect(html).toContain("リンク背景色はアクセント色から自動生成される");
     expect(html).toContain('"borderColor":"#0B5FFF"');
     expect(html).toContain("checked");
     expect(html).toContain("ADMIN_CSS");
+  });
+
+  it("highlights registered keywords in message text with keyword-hl span", async () => {
+    const web = createWebModule(new Map(), 0);
+    const ctx = makeContext();
+
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "hello world"],
+    });
+
+    const html = web.buildChannelMessagesPage(
+      "#general",
+      "",
+      "apricot",
+      buildWebUiSettings({ highlightKeywords: "hello" })
+    );
+
+    expect(html).toContain('<span class="keyword-hl">hello</span>');
+    expect(html).toContain("world");
+  });
+
+  it("keyword highlighting is case-insensitive and preserves original casing", async () => {
+    const web = createWebModule(new Map(), 0);
+    const ctx = makeContext();
+
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "Hello World"],
+    });
+
+    const html = web.buildChannelMessagesPage(
+      "#general",
+      "",
+      "apricot",
+      buildWebUiSettings({ highlightKeywords: "hello" })
+    );
+
+    expect(html).toContain('<span class="keyword-hl">Hello</span>');
+  });
+
+  it("keyword highlighting does not wrap text inside anchor tags", async () => {
+    const web = createWebModule(new Map(), 0);
+    const ctx = makeContext();
+
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "visit https://example.com and say hello"],
+    });
+
+    const html = web.buildChannelMessagesPage(
+      "#general",
+      "",
+      "apricot",
+      buildWebUiSettings({ highlightKeywords: "example" })
+    );
+
+    // URL anchor should be intact
+    expect(html).toContain('<a href="https://example.com"');
+    // "example" inside the <a> tag should NOT be wrapped
+    expect(html).not.toMatch(/<a [^>]*>.*<span class="keyword-hl">example<\/span>/);
+  });
+
+  it("adds msg-dimmed class to lines containing a dim keyword", async () => {
+    const web = createWebModule(new Map(), 0);
+    const ctx = makeContext();
+
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "bot!bot@host",
+      command: "PRIVMSG",
+      params: ["#general", "NickServ: Please identify"],
+    });
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "hello everyone"],
+    });
+
+    const html = web.buildChannelMessagesPage(
+      "#general",
+      "",
+      "apricot",
+      buildWebUiSettings({ dimKeywords: "NickServ" })
+    );
+
+    expect(html).toContain('<div class="msg-dimmed">');
+    // Normal message should not be dimmed
+    const normalDivIdx = html.lastIndexOf("hello everyone");
+    const dimmedDivIdx = html.indexOf('<div class="msg-dimmed">');
+    expect(normalDivIdx).toBeGreaterThan(-1);
+    expect(dimmedDivIdx).toBeGreaterThan(-1);
+    // Only one line should be dimmed
+    expect(html.split('<div class="msg-dimmed">').length - 1).toBe(1);
+  });
+
+  it("no msg-dimmed class when dim keywords list is empty", async () => {
+    const web = createWebModule(new Map(), 0);
+    const ctx = makeContext();
+
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "hello"],
+    });
+
+    const html = web.buildChannelMessagesPage(
+      "#general",
+      "",
+      "apricot",
+      buildWebUiSettings({ dimKeywords: "" })
+    );
+
+    expect(html).not.toContain("msg-dimmed");
   });
 });

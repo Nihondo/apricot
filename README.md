@@ -8,10 +8,12 @@ Cloudflare Workers + Durable Objects で動作します。
 ---
 ## できること
 - IRC サーバーへの永続接続（切断時も自動再接続）
-- ブラウザでのチャットインターフェース（30 秒ごとの自動リロード）
-- WebSocket対応 IRC クライアントからの接続
+- ブラウザでのチャットインターフェース（テーマカスタマイズ・キーワードハイライト対応）
+- WebSocket 対応 IRC クライアントからの接続
 - REST API 経由での操作（チャンネル参加・メッセージ投稿・nick 変更）
-- REST API 経由の投稿機能（URL投稿時はページタイトルの自動取得あり）
+- URL 投稿時のページタイトル自動取得（Twitter/X oEmbed 対応）
+
+---
 
 ## クイックスタート（初回セットアップ）
 
@@ -48,6 +50,9 @@ API_KEY=your-local-api-key
 IRC_PASSWORD=optional-server-password
 CLIENT_PASSWORD=optional-client-password
 ```
+
+`CLIENT_PASSWORD` を設定すると、Web UI へのアクセスにもパスワード認証が必要になります。
+未設定の場合は Web UI が公開状態になります。
 
 ### 3. ローカルで起動する
 
@@ -97,40 +102,32 @@ curl http://localhost:8787/proxy/myproxy/api/status
 http://localhost:8787/proxy/myproxy/web/
 ```
 
-| URL | 説明 |
-|-----|------|
-| `/proxy/:id/web/` | 参加中チャンネル一覧 |
-| `/proxy/:id/web/settings` | Web UI の表示設定 |
-| `/proxy/:id/web/:channel` | チャンネルシェル画面 |
-| `/proxy/:id/web/:channel/messages` | メッセージ一覧フレーム |
-| `/proxy/:id/web/:channel/composer` | 入力フォームフレーム |
+**チャンネル一覧画面**から参加中のチャンネルを選択すると、チャンネル画面に遷移します。
 
-**主な機能**:
+チャンネル画面では:
+- メッセージの送受信
+- URL の自動リンク化
+- 30 秒ごとの自動リフレッシュ
 
-- メッセージは最新 `WEB_LOG_MAX_LINES` 件をインメモリに保持（デフォルト 200 件、新しい順に表示）
-- Durable Object storage にもログを保存し、DO 再起動後も再接続で表示を復元
-- チャンネル画面は shell + messages + composer の iframe 2 分割で構成
-- composer の `☰` は下フレーム内ではなく、同じタブ全体をチャンネル一覧へ戻す
-- 30 秒ごとの自動リフレッシュは messages フレームだけで実行
-- `displayOrder=asc`（古い順）では初期表示時に最下部まで自動スクロール
-- メッセージ入力欄は `displayOrder=asc` で画面下、`displayOrder=desc` で画面上に吸着して表示
-- URL は自動リンク化
-- `TIMEZONE_OFFSET` で時刻表示のタイムゾーンを設定可能（デフォルト UTC）
-- チャンネル一覧、設定画面、ログイン画面は固定のモダンUIで表示
-- 設定画面からチャンネル画面専用のフォント、文字サイズ、使用中テーマ色一式、追加 CSS を変更可能
-- チャンネル画面は `prefers-color-scheme` 連動ではなく、proxy ごとに保存した単一テーマで常時描画
-- `Light に戻す` / `Dark に戻す` で既定配色プリセットへ戻せる
-- `--link-bg` は `accentColor` から `rgba(r,g,b,0.2)` を自動生成し、個別入力はしない
-- メッセージの表示順（古い順 / 新しい順）は設定画面で proxy ごとに保存し、チャンネル画面に反映
+チャンネル一覧画面では:
+- チャンネルへの参加・離脱
+- ニックネームの変更
+- 設定画面へのアクセス（パスワード設定時のみ）
 
-**パスワードを設定する場合**:
+#### Web UI の表示カスタマイズ
 
-`CLIENT_PASSWORD` を設定すると Web UI もログイン必須になります。未設定時は公開状態になります。
-ログインは `/proxy/:id/web/login` から行い、認証は proxy ID ごとの HttpOnly Cookie で保持されます。
-設定画面は認証済み Web UI からのみ利用でき、設定内容は proxy ID ごとに Durable Object storage に保存されます。
-`Settings` 導線はチャンネル一覧画面にのみ表示され、チャンネル画面とログイン画面には表示されません。
-保存した表示カスタマイズはチャンネル画面のみに適用され、チャンネル一覧・設定画面・ログイン画面の見た目は固定です。
-未使用の `--text-contrast-high` は現状の設定画面では編集対象に含めていません。
+設定画面（`/proxy/:id/web/settings`）から以下を変更できます:
+
+- **フォント・文字サイズ** — チャンネル画面のフォントファミリーとサイズ
+- **配色テーマ** — 13 色のカラーピッカーによるテーマ設定。ライト／ダークのプリセットあり
+- **表示順** — 古い順（asc）/ 新しい順（desc）の切り替え
+- **キーワード強調** — 指定語をハイライト表示
+- **キーワード DIM** — 指定語を含むメッセージを薄く表示
+- **追加 CSS** — 自由なスタイル記述
+
+設定内容はプロキシ ID ごとに保存され、チャンネル画面にのみ適用されます。
+
+> **補足**: 設定画面は `CLIENT_PASSWORD` を設定した場合にのみアクセスできます。
 
 ---
 
@@ -159,7 +156,7 @@ ws://localhost:8787/proxy/myproxy/ws
 
 ### 外部スクリプト・API から利用する
 
-プログラムから IRC チャンネルにメッセージを投稿する REST API です。
+プログラムから IRC チャンネルを操作する REST API です。
 `Authorization: Bearer <API_KEY>` ヘッダーによる認証が必要です。
 
 #### チャンネルに参加する
@@ -263,7 +260,24 @@ curl http://localhost:8787/proxy/myproxy/api/logs/%23general
 | `nick` | string | 発言者 nick |
 | `text` | string | メッセージ本文（`nick` / `topic` 等では対象または新しい値） |
 
-最大 200 件（最新順ではなく時系列順）を返します。指定チャンネルのバッファが存在しない場合は `404` を返します。
+最大 200 件（時系列順）を返します。指定チャンネルのバッファが存在しない場合は `404` を返します。
+
+### 複数ユーザで使うには
+
+プロキシ ID をユーザーごとに分けることで、1 つの Workers デプロイを複数人で共有できます。
+
+```
+Alice → https://.../proxy/alice/web/
+Bob   → https://.../proxy/bob/web/
+```
+
+各プロキシ ID は独立した環境を持ちます:
+
+- IRC 接続（サーバー・ニックネーム・チャンネル状態）
+- メッセージログ
+- Web UI の表示設定
+
+**注意**: `CLIENT_PASSWORD` はデプロイ全体で 1 つだけ設定できます。プロキシ ID ごとにパスワードを分けることはできないため、全ユーザーが同じパスワードを共有します。また、IRC サーバーの接続設定（`IRC_HOST` 等）も全プロキシ ID で共通です。
 
 ---
 
@@ -299,7 +313,7 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 
 ---
 
-## 設定リファレンス
+## 技術リファレンス
 
 ### 環境変数一覧
 
@@ -307,17 +321,17 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 |----------|:----:|-----------|------|
 | `IRC_HOST` | ✅ | ─ | IRC サーバーホスト名 |
 | `IRC_PORT` | ─ | `6667` | IRC サーバーポート（レンジ・複数指定可、例: `6660-6669` や `6660,6667,6697`） |
-| `IRC_NICK` | ─ | `apricot` | IRC NICKネーム |
+| `IRC_NICK` | ─ | `apricot` | IRC ニックネーム |
 | `IRC_USER` | ─ | `apricot` | IRC ユーザー名 |
 | `IRC_REALNAME` | ─ | `apricot IRC Proxy` | IRC リアルネーム |
 | `IRC_TLS` | ─ | `false` | TLS 使用（`true` / `false`） |
 | `IRC_PASSWORD` | ─ | ─ | IRC サーバーパスワード（secret 推奨） |
 | `CLIENT_PASSWORD` | ─ | ─ | WebSocket クライアント接続と Web UI ログインの共通パスワード（secret 推奨） |
-| `IRC_AUTO_CONNECT_ON_STARTUP` | ─ | `true` | Durable Object インスタンス起動時に IRC へ接続開始 |
-| `IRC_AUTO_RECONNECT_ON_DISCONNECT` | ─ | `true` | IRC 切断時に 5 秒後の自動再接続を有効化 |
+| `IRC_AUTO_CONNECT_ON_STARTUP` | ─ | `false` | Durable Object インスタンス起動時に IRC へ接続開始 |
+| `IRC_AUTO_RECONNECT_ON_DISCONNECT` | ─ | `false` | IRC 切断時に 5 秒後の自動再接続を有効化（API 手動切断時は抑制） |
 | `IRC_AUTOJOIN` | ─ | ─ | 自動参加チャンネル（カンマ区切り、例: `#general,#test`） |
-| `KEEPALIVE_INTERVAL` | ─ | `60` | DO keepalive 間隔（秒）。IRC 接続中に Alarm を再設定して DO の退避を防ぎやすくする |
 | `IRC_ENCODING` | ─ | `utf-8` | IRC サーバーの文字コード（例: `iso-2022-jp`、`euc-jp`、`shift_jis`） |
+| `KEEPALIVE_INTERVAL` | ─ | `60` | DO keepalive 間隔（秒） |
 | `TIMEZONE_OFFSET` | ─ | `9` | Web UI の時刻表示オフセット（時間単位、例: JST は `9`） |
 | `WEB_LOG_MAX_LINES` | ─ | `200` | チャンネルごとのログ保持件数 |
 | `API_KEY` | ✅ | ─ | 外部 API 認証キー（secret 必須） |
@@ -330,53 +344,62 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 任意の文字列をプロキシ ID として使用できます（例: `myproxy`、`main`）。
 全インスタンスが同じ環境変数設定を共有しますが、IRC 接続やチャンネル状態は独立しています。
 
----
-
-## 開発者向け情報
-
-### ローカル開発コマンド
-
-型チェック:
-
-```bash
-npm run check
-```
-
-テスト実行:
-
-```bash
-npm test
-```
-
 ### API エンドポイント一覧
 
 | メソッド | パス | 認証 | 説明 |
 |----------|------|:----:|------|
 | `GET` | `/` または `/health` | ─ | ヘルスチェック |
 | `GET` | `/proxy/:id/ws` | ─ | WebSocket 接続（IRC クライアント用） |
-| `GET` | `/proxy/:id/web/` | ─ | チャンネル一覧ページ |
+| `GET` | `/proxy/:id/web/` | Cookie | チャンネル一覧ページ |
 | `GET` | `/proxy/:id/web/login` | ─ | Web UI ログイン画面 |
 | `POST` | `/proxy/:id/web/login` | ─ | Web UI ログイン |
 | `POST` | `/proxy/:id/web/logout` | ─ | Web UI ログアウト |
-| `GET` | `/proxy/:id/web/:channel` | ─ | チャンネルシェルページ |
-| `GET` | `/proxy/:id/web/:channel/messages` | ─ | チャンネルのメッセージ一覧 |
-| `GET` | `/proxy/:id/web/:channel/composer` | ─ | チャンネルの入力フォーム |
-| `POST` | `/proxy/:id/web/:channel/composer` | ─ | Web フォームからメッセージ送信 |
-| `POST` | `/proxy/:id/api/connect` | ✅ Bearer | IRC サーバーへ接続 |
-| `POST` | `/proxy/:id/api/disconnect` | ✅ Bearer | IRC サーバー手動切断 API |
-| `POST` | `/proxy/:id/api/join` | ✅ Bearer | チャンネル参加 API |
-| `POST` | `/proxy/:id/api/leave` | ✅ Bearer | チャンネル離脱 API |
-| `POST` | `/proxy/:id/api/post` | ✅ Bearer | 外部投稿 API |
-| `POST` | `/proxy/:id/api/nick` | ✅ Bearer | nick 変更 API |
-| `GET` | `/proxy/:id/api/logs/:channel` | ─ | チャンネルログ取得 API |
+| `GET` | `/proxy/:id/web/settings` | Cookie | Web UI 表示設定ページ |
+| `POST` | `/proxy/:id/web/settings` | Cookie | Web UI 設定保存 |
+| `POST` | `/proxy/:id/web/join` | Cookie | Web UI チャンネル参加 |
+| `POST` | `/proxy/:id/web/leave` | Cookie | Web UI チャンネル離脱 |
+| `POST` | `/proxy/:id/web/nick` | Cookie | Web UI ニックネーム変更 |
+| `GET` | `/proxy/:id/web/:channel` | Cookie | チャンネルシェルページ |
+| `GET` | `/proxy/:id/web/:channel/messages` | Cookie | メッセージ一覧フレーム |
+| `GET` | `/proxy/:id/web/:channel/composer` | Cookie | 入力フォームフレーム |
+| `POST` | `/proxy/:id/web/:channel/composer` | Cookie | Web フォームからメッセージ送信 |
+| `POST` | `/proxy/:id/api/connect` | Bearer | IRC サーバーへ接続 |
+| `POST` | `/proxy/:id/api/disconnect` | Bearer | IRC サーバー手動切断 |
+| `POST` | `/proxy/:id/api/join` | Bearer | チャンネル参加 |
+| `POST` | `/proxy/:id/api/leave` | Bearer | チャンネル離脱 |
+| `POST` | `/proxy/:id/api/post` | Bearer | 外部投稿 |
+| `POST` | `/proxy/:id/api/nick` | Bearer | nick 変更 |
+| `GET` | `/proxy/:id/api/logs/:channel` | ─ | チャンネルログ取得 |
 | `GET` | `/proxy/:id/api/status` | ─ | 接続状態確認 |
 | `OPTIONS` | `/proxy/:id/api/*` | ─ | CORS プリフライト |
 
+> **補足**: Cookie 認証は `CLIENT_PASSWORD` 設定時のみ有効です。未設定時はこれらのエンドポイントに認証なしでアクセスできます。
+
+### Web UI の URL 構造
+
+| URL | 説明 |
+|-----|------|
+| `/proxy/:id/web/` | 参加中チャンネル一覧 |
+| `/proxy/:id/web/login` | ログイン画面 |
+| `/proxy/:id/web/settings` | 表示設定 |
+| `/proxy/:id/web/:channel` | チャンネルシェル画面（iframe 構成） |
+| `/proxy/:id/web/:channel/messages` | メッセージ一覧フレーム |
+| `/proxy/:id/web/:channel/composer` | 入力フォームフレーム |
+
 ---
 
-## アーキテクチャ
+## 開発者向け情報
 
-### 概要
+### ローカル開発コマンド
+
+```bash
+npm run dev      # ローカル開発サーバー起動
+npm run check    # TypeScript 型チェック
+npm test         # テスト実行（Vitest）
+npm run deploy   # Cloudflare Workers へデプロイ
+```
+
+### アーキテクチャ
 
 ```
 ブラウザ (HTTP)
@@ -395,13 +418,14 @@ IRC クライアント (WebSocket)  ──→  Cloudflare Worker (index.ts)
 |----------|------|
 | `src/index.ts` | Worker エントリポイント・ルーティング・API 認証 |
 | `src/irc-proxy.ts` | Durable Object 本体（状態管理・WebSocket・HTTP ハンドラ） |
-| `src/irc-connection.ts` | IRC サーバーへの TCP ソケット接続 |
+| `src/irc-connection.ts` | IRC サーバーへの TCP ソケット接続（状態マシン: idle → pending → processing → destroyed） |
 | `src/irc-parser.ts` | IRC メッセージのパース・ビルド（IRCv3 タグ対応） |
+| `src/proxy-config.ts` | 型付き環境変数パース |
 | `src/module-system.ts` | plum 互換モジュールシステム（`ss_*` / `cs_*` イベント） |
 | `src/modules/ping.ts` | PING/PONG 自動応答 |
 | `src/modules/channel-track.ts` | JOIN/PART/KICK/QUIT/NICK によるチャンネル状態追跡 |
 | `src/modules/client-sync.ts` | 新規クライアント接続時の状態リプレイ |
-| `src/modules/web.ts` | Web チャットインターフェース・メッセージバッファ |
+| `src/modules/web.ts` | Web チャットインターフェース・メッセージバッファ・DO ストレージ永続化 |
 | `src/modules/url-metadata.ts` | URL メタデータ抽出（Twitter/X oEmbed・HTML title） |
 
 ### IRC 接続状態遷移
@@ -432,7 +456,7 @@ stateDiagram-v2
 
 ### 常駐しているように見せる仕組み
 
-このプロジェクトでは、IRC 接続確立後に Durable Object が `storage.setAlarm()` で次回の keepalive を予約し、`alarm()` ハンドラが起動するたびに再び次回アラームを登録します。
+IRC 接続確立後に Durable Object が `storage.setAlarm()` で次回の keepalive を予約し、`alarm()` ハンドラが起動するたびに再び次回アラームを登録します。
 
 ```text
 IRC 接続完了
@@ -446,12 +470,11 @@ IRC 接続中なら次回 Alarm を再予約
 この繰り返しで DO に定期イベントを入れ続ける
 ```
 
-ポイントは、Durable Object が「完全に常駐している」わけではなく、アイドル退避される前に定期的なイベントを入れることで、同じインスタンスと in-memory 状態を維持しやすくしている点です。`workers/src/irc-proxy.ts` では、IRC 接続中は keepalive 用 Alarm を回し続け、切断時には Alarm を停止します。
+Durable Object が「完全に常駐している」わけではなく、アイドル退避される前に定期的なイベントを入れることで、同じインスタンスと in-memory 状態を維持しやすくしています。切断時には Alarm を停止します。
 
-この仕組みにより、IRC 側からしばらく発言が流れなくても Durable Object が休眠しにくくなり、結果として IRC への TCP 接続も維持しやすくなります。一方で、Cloudflare のデプロイ、ランタイム更新、配置変更などでは Durable Object が再生成される可能性があるため、永続稼働が保証されるわけではありません。そのため本実装は、再接続やログ復元を前提に設計しています。
+Cloudflare のデプロイ、ランタイム更新、配置変更などでは Durable Object が再生成される可能性があるため、永続稼働が保証されるわけではありません。そのため再接続やログ復元を前提に設計しています。
 
 `KEEPALIVE_INTERVAL` は短すぎると invocation 数が増え、長すぎると次の Alarm より先に退避されるリスクがあります。運用時は接続安定性とコストのバランスを見ながら調整してください。
-
 
 ## 前提技術
 

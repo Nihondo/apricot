@@ -13,6 +13,7 @@
     --button-fg: #FFFFFF;
     --accent-self: #2E7D32;
     --text-contrast-low: #75715E;
+    --accent-keyword: #D84315;
   }
 }
 @media(prefers-color-scheme: dark) {
@@ -30,6 +31,7 @@
     --button-fg: #FFFFFF;
     --accent-self: #66D9EF;
     --text-contrast-low: #75715E;
+    --accent-keyword: #FD971F;
   }
 }
 * { box-sizing: border-box; }
@@ -37,7 +39,7 @@ html { height: 100%; }
 body {
   font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
   line-height: 1.5;
-  --composer-frame-height: calc(1.8em + 2px);
+  --composer-frame-height: calc(2.2em + 2px);
   color: var(--textcolor);
   background-color: var(--rowcolor0);
   margin: 0;
@@ -48,6 +50,8 @@ div { word-wrap: break-word; }
 .channel-messages-shell > div:nth-child(odd) { background-color: var(--rowcolor0); }
 .channel-messages-shell > div:nth-child(even) { background-color: var(--rowcolor1); }
 .channel-messages-shell > div:has(a) { color: var(--accent-highlight); }
+.keyword-hl { color: var(--accent-keyword); font-weight: bold; }
+.channel-messages-shell > div.msg-dimmed { color: var(--text-contrast-low); }
 hr { border: none; border-top: 1px solid var(--border-color); margin: 5px 0; }
 .timestamp { color: var(--accent-timestamp); }
 .username-self { color: var(--accent-self); font-weight: bold; }

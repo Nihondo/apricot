@@ -313,8 +313,11 @@ describe("IrcProxyDO web log persistence", () => {
       buttonTextColor: "#F0F0F0",
       selfColor: "#00CCFF",
       mutedTextColor: "#666666",
+      keywordColor: "#D84315",
       displayOrder: "asc",
       extraCss: "body { color: blue; }",
+      highlightKeywords: "",
+      dimKeywords: "",
     } satisfies WebUiSettings);
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
@@ -435,8 +438,11 @@ describe("IrcProxyDO web log persistence", () => {
         "buttonTextColor=%23F0F0F0",
         "selfColor=%2300CCFF",
         "mutedTextColor=%23666666",
+        "keywordColor=%23FF4400",
         "displayOrder=asc",
         "extraCss=body%20%7B%20color%3A%20blue%3B%20%7D",
+        "highlightKeywords=hello%0Aworld",
+        "dimKeywords=NickServ",
       ].join("&"),
     }));
 
@@ -457,8 +463,11 @@ describe("IrcProxyDO web log persistence", () => {
       buttonTextColor: "#F0F0F0",
       selfColor: "#00CCFF",
       mutedTextColor: "#666666",
+      keywordColor: "#FF4400",
       displayOrder: "asc",
       extraCss: "body { color: blue; }",
+      highlightKeywords: "hello\nworld",
+      dimKeywords: "NickServ",
     });
 
     await (proxy as any).handleServerMessage({

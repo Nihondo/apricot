@@ -51,6 +51,7 @@ export interface WebUiColorSettings {
   buttonTextColor: string;
   selfColor: string;
   mutedTextColor: string;
+  keywordColor: string;
 }
 
 export interface WebUiSettings extends WebUiColorSettings {
@@ -58,6 +59,8 @@ export interface WebUiSettings extends WebUiColorSettings {
   fontSizePx: number;
   displayOrder: WebDisplayOrder;
   extraCss: string;
+  highlightKeywords: string;
+  dimKeywords: string;
 }
 
 const DEFAULT_maxLines = 200;
@@ -75,6 +78,7 @@ export const LIGHT_WEB_UI_COLOR_PRESET: WebUiColorSettings = {
   buttonTextColor: "#FFFFFF",
   selfColor: "#2E7D32",
   mutedTextColor: "#75715E",
+  keywordColor: "#D84315",
 };
 
 export const DARK_WEB_UI_COLOR_PRESET: WebUiColorSettings = {
@@ -90,6 +94,7 @@ export const DARK_WEB_UI_COLOR_PRESET: WebUiColorSettings = {
   buttonTextColor: "#FFFFFF",
   selfColor: "#66D9EF",
   mutedTextColor: "#75715E",
+  keywordColor: "#FD971F",
 };
 
 export const DEFAULT_WEB_UI_SETTINGS: WebUiSettings = {
@@ -98,6 +103,8 @@ export const DEFAULT_WEB_UI_SETTINGS: WebUiSettings = {
   ...LIGHT_WEB_UI_COLOR_PRESET,
   displayOrder: "desc",
   extraCss: "",
+  highlightKeywords: "",
+  dimKeywords: "",
 };
 
 type MessageBufferStore = Map<string, StoredMessage[]>;
@@ -115,6 +122,7 @@ const WEB_UI_COLOR_FIELDS = [
   { name: "buttonTextColor", label: "ボタン文字色" },
   { name: "selfColor", label: "自分の発言色" },
   { name: "mutedTextColor", label: "補助文字色" },
+  { name: "keywordColor", label: "キーワード強調色" },
 ] as const satisfies ReadonlyArray<{ name: keyof WebUiColorSettings; label: string }>;
 
 /** Minimal interface for channel membership lookup (avoids circular import) */
@@ -206,6 +214,7 @@ export function buildChannelCss(settings: WebUiSettings): string {
     `--button-fg: ${settings.buttonTextColor};`,
     `--accent-self: ${settings.selfColor};`,
     `--text-contrast-low: ${settings.mutedTextColor};`,
+    `--accent-keyword: ${settings.keywordColor};`,
   ];
   const typographyLines = [
     `font-family: ${settings.fontFamily};`,
@@ -267,13 +276,21 @@ window.addEventListener("DOMContentLoaded", function () {
 }
 
 /**
+ * Parses a newline/comma-separated keyword string into a list of trimmed, non-empty keywords.
+ */
+function parseKeywords(raw: string): string[] {
+  return raw.split(/[\n,]/).map((k) => k.trim()).filter((k) => k.length > 0);
+}
+
+/**
  * Escape text for HTML, linkifying any URLs found in the raw string.
+ * Also wraps any matched highlightKeywords in <span class="keyword-hl">.
  *
  * URLs are extracted from the raw (unescaped) text first, so the href
  * attribute contains the real URL (not &amp;-encoded).  The surrounding
  * non-URL text and the link label are then HTML-escaped safely.
  */
-function renderText(raw: string): string {
+function renderText(raw: string, highlightKeywords: string[] = []): string {
   const urlRe = /(https?:\/\/[^\s<>"]+)/g;
   let result = "";
   let last = 0;
@@ -288,7 +305,18 @@ function renderText(raw: string): string {
     last = m.index + url.length;
   }
   result += escapeHtml(raw.slice(last));
-  return result;
+
+  if (highlightKeywords.length === 0) {
+    return result;
+  }
+
+  // Wrap keyword matches in non-anchor text segments only.
+  const escaped = highlightKeywords.map((k) => k.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  const kwRe = new RegExp(`(${escaped.join("|")})`, "gi");
+  return result.replace(/(<a [^>]*>.*?<\/a>)|([^<]+)/g, (_, anchor, text) => {
+    if (anchor) return anchor;
+    return text.replace(kwRe, '<span class="keyword-hl">$1</span>');
+  });
 }
 
 function formatTime(ms: number, offsetHours: number): string {
@@ -298,18 +326,18 @@ function formatTime(ms: number, offsetHours: number): string {
   return `${hh}:${mm}`;
 }
 
-function renderMessage(m: StoredMessage, selfNick: string, offsetHours: number): string {
+function renderMessage(m: StoredMessage, selfNick: string, offsetHours: number, highlightKeywords: string[] = []): string {
   const ts = `<span class="timestamp">${formatTime(m.time, offsetHours)}</span>`;
   const isSelf = m.nick.toLowerCase() === selfNick.toLowerCase();
   const nickClass = isSelf ? "username-self" : "username-other";
 
   switch (m.type) {
     case "privmsg":
-      return `${ts} <span class="${nickClass}">${escapeHtml(m.nick)}&gt;</span> ${renderText(m.text)}`;
+      return `${ts} <span class="${nickClass}">${escapeHtml(m.nick)}&gt;</span> ${renderText(m.text, highlightKeywords)}`;
     case "notice":
-      return `${ts} <span class="${nickClass}">(${escapeHtml(m.nick)})</span> ${renderText(m.text)}`;
+      return `${ts} <span class="${nickClass}">(${escapeHtml(m.nick)})</span> ${renderText(m.text, highlightKeywords)}`;
     case "self":
-      return `${ts} <span class="username-self">${escapeHtml(m.nick)}&gt;</span> ${renderText(m.text)}`;
+      return `${ts} <span class="username-self">${escapeHtml(m.nick)}&gt;</span> ${renderText(m.text, highlightKeywords)}`;
     case "join":
       return `${ts} <span class="timestamp">*** ${escapeHtml(m.nick)} has joined ${escapeHtml(m.text)}</span>`;
     case "part":
@@ -325,7 +353,7 @@ function renderMessage(m: StoredMessage, selfNick: string, offsetHours: number):
     case "mode":
       return `${ts} <span class="timestamp">*** ${escapeHtml(m.nick)} sets mode ${escapeHtml(m.text)}</span>`;
     default:
-      return `${ts} ${renderText(m.text)}`;
+      return `${ts} ${renderText(m.text, highlightKeywords)}`;
   }
 }
 
@@ -431,6 +459,8 @@ export function buildSettingsPage(
     .replace("{{DISPLAY_ORDER_ASC_CHECKED}}", isAscendingOrder ? "checked" : "")
     .replace("{{DISPLAY_ORDER_DESC_CHECKED}}", isAscendingOrder ? "" : "checked")
     .replace("{{EXTRA_CSS}}", escapeHtml(webUiSettings.extraCss))
+    .replace("{{HIGHLIGHT_KEYWORDS}}", escapeHtml(webUiSettings.highlightKeywords))
+    .replace("{{DIM_KEYWORDS}}", escapeHtml(webUiSettings.dimKeywords))
     .replace("{{SETTINGS_SCRIPT}}", settingsScript);
 }
 
@@ -618,8 +648,15 @@ export function createWebModule(
   ): string {
     const buf = getBuffer(channel);
     const ordered = webUiSettings.displayOrder === "asc" ? [...buf] : [...buf].reverse();
+    const hlKeywords = parseKeywords(webUiSettings.highlightKeywords);
+    const dimKeywordList = parseKeywords(webUiSettings.dimKeywords);
     const lines = ordered
-      .map((msg) => `<div>${renderMessage(msg, selfNick, timezoneOffset)}</div>`)
+      .map((msg) => {
+        const isDimmed = dimKeywordList.length > 0 &&
+          dimKeywordList.some((kw) => msg.text.toLowerCase().includes(kw.toLowerCase()));
+        const divAttrs = isDimmed ? ' class="msg-dimmed"' : "";
+        return `<div${divAttrs}>${renderMessage(msg, selfNick, timezoneOffset, hlKeywords)}</div>`;
+      })
       .join("\n");
     const reloadButton = webUiSettings.displayOrder === "desc"
       ? '<button type="button" class="floating" onclick="location.reload();">再読込</button>'

@@ -45,6 +45,7 @@ const webUiColorFieldNames: Array<keyof WebUiColorSettings> = [
   "buttonTextColor",
   "selfColor",
   "mutedTextColor",
+  "keywordColor",
 ];
 
 export class IrcProxyDO implements DurableObject {
@@ -1276,6 +1277,24 @@ export class IrcProxyDO implements DurableObject {
       };
     }
 
+    const highlightKeywords = (formData.get("highlightKeywords") as string | null) ?? "";
+    if (highlightKeywords.length > 2048) {
+      return {
+        settings: { ...draftSettings },
+        errorMessage: "キーワード強調は 2KB 以下にしてください",
+      };
+    }
+    draftSettings.highlightKeywords = highlightKeywords;
+
+    const dimKeywords = (formData.get("dimKeywords") as string | null) ?? "";
+    if (dimKeywords.length > 2048) {
+      return {
+        settings: { ...draftSettings },
+        errorMessage: "キーワードDIMは 2KB 以下にしてください",
+      };
+    }
+    draftSettings.dimKeywords = dimKeywords;
+
     return {
       settings: buildWebUiSettings(draftSettings),
     };
@@ -1301,6 +1320,12 @@ export class IrcProxyDO implements DurableObject {
     const extraCss = typeof stored.extraCss === "string" && stored.extraCss.length <= 10_240
       ? stored.extraCss
       : DEFAULT_WEB_UI_SETTINGS.extraCss;
+    const highlightKeywords = typeof stored.highlightKeywords === "string" && stored.highlightKeywords.length <= 2048
+      ? stored.highlightKeywords
+      : DEFAULT_WEB_UI_SETTINGS.highlightKeywords;
+    const dimKeywords = typeof stored.dimKeywords === "string" && stored.dimKeywords.length <= 2048
+      ? stored.dimKeywords
+      : DEFAULT_WEB_UI_SETTINGS.dimKeywords;
 
     return buildWebUiSettings({
       fontFamily,
@@ -1317,8 +1342,11 @@ export class IrcProxyDO implements DurableObject {
       buttonTextColor: isValidColor(stored.buttonTextColor) ? stored.buttonTextColor : LIGHT_WEB_UI_COLOR_PRESET.buttonTextColor,
       selfColor: isValidColor(stored.selfColor) ? stored.selfColor : LIGHT_WEB_UI_COLOR_PRESET.selfColor,
       mutedTextColor: isValidColor(stored.mutedTextColor) ? stored.mutedTextColor : LIGHT_WEB_UI_COLOR_PRESET.mutedTextColor,
+      keywordColor: isValidColor(stored.keywordColor) ? stored.keywordColor : LIGHT_WEB_UI_COLOR_PRESET.keywordColor,
       displayOrder,
       extraCss,
+      highlightKeywords,
+      dimKeywords,
     });
   }
 
