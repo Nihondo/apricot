@@ -43,11 +43,6 @@ body {
   margin: 0;
   padding: 0;
 }
-@supports (height: 1lh) {
-  body {
-    --composer-frame-height: calc(2lh + 2px);
-  }
-}
 div { word-wrap: break-word; }
 .channel-messages-shell > div { padding: 0px 3px; }
 .channel-messages-shell > div:nth-child(odd) { background-color: var(--rowcolor0); }
