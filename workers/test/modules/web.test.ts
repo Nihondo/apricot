@@ -1,8 +1,15 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ModuleContext } from "../../src/module-system";
+
+const { resolveMessageEmbedMock } = vi.hoisted(() => ({
+  resolveMessageEmbedMock: vi.fn(),
+}));
 
 vi.mock("../../src/templates/admin-style.css", () => ({ default: "ADMIN_CSS" }));
 vi.mock("../../src/templates/style.css", () => ({ default: "" }));
+vi.mock("../../src/modules/url-metadata", () => ({
+  resolveMessageEmbed: resolveMessageEmbedMock,
+}));
 vi.mock("../../src/templates/channel.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body><div class=\"shell\">{{FRAME_CONTENT}}</div></body></html>",
 }));
@@ -16,7 +23,7 @@ vi.mock("../../src/templates/channel-list.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}<p>{{SERVER_NAME}} に {{NICK}} として参加</p>{{FLASH_MESSAGE}}{{NICK_FORM}}<div>{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</div><span>サーバー: {{SERVER_NAME}}</span><span>NICK: {{NICK}}</span></body></html>",
 }));
 vi.mock("../../src/templates/settings.html", () => ({
-  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{ERROR}}この設定はチャンネル画面にのみ適用されます。{{PRESET_CONTROLS}}<form action=\"{{ACTION_URL}}\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\">{{COLOR_FIELDS}}<textarea name=\"highlightKeywords\">{{HIGHLIGHT_KEYWORDS}}</textarea><textarea name=\"dimKeywords\">{{DIM_KEYWORDS}}</textarea><textarea>{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form>{{SETTINGS_SCRIPT}}</body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{ERROR}}この設定はチャンネル画面にのみ適用されます。{{PRESET_CONTROLS}}<form action=\"{{ACTION_URL}}\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\">{{COLOR_FIELDS}}<input type=\"checkbox\" name=\"enableInlineUrlPreview\" {{ENABLE_INLINE_URL_PREVIEW_CHECKED}}><textarea name=\"highlightKeywords\">{{HIGHLIGHT_KEYWORDS}}</textarea><textarea name=\"dimKeywords\">{{DIM_KEYWORDS}}</textarea><textarea>{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form>{{SETTINGS_SCRIPT}}</body></html>",
 }));
 
 import {
@@ -44,6 +51,11 @@ function makeContext(overrides: Partial<ModuleContext> = {}): ModuleContext {
 }
 
 describe("createWebModule", () => {
+  beforeEach(() => {
+    resolveMessageEmbedMock.mockReset();
+    resolveMessageEmbedMock.mockResolvedValue(undefined);
+  });
+
   it("returns snapshot logs grouped by lowercase channel", async () => {
     const web = createWebModule(new Map(), 0);
     const ctx = makeContext();
@@ -313,7 +325,7 @@ describe("createWebModule", () => {
       "apricot",
       "irc.example.com",
       "/proxy/main/web",
-      buildWebUiSettings({ displayOrder: "asc", extraCss: "body { color: blue; }" }),
+      buildWebUiSettings({ displayOrder: "asc", extraCss: "body { color: blue; }", enableInlineUrlPreview: true }),
       "入力エラー"
     );
 
@@ -326,11 +338,70 @@ describe("createWebModule", () => {
     expect(html).toContain('name="keywordColor"');
     expect(html).toContain('name="highlightKeywords"');
     expect(html).toContain('name="dimKeywords"');
+    expect(html).toContain('name="enableInlineUrlPreview"');
     expect(html).toContain("ライト");
     expect(html).toContain("ダーク");
     expect(html).toContain('"borderColor":"#0B5FFF"');
     expect(html).toContain("checked");
     expect(html).toContain("ADMIN_CSS");
+  });
+
+  it("renders inline URL embeds when the setting is enabled", async () => {
+    resolveMessageEmbedMock.mockResolvedValue({
+      kind: "image",
+      sourceUrl: "https://cdn.example.com/cat.jpg",
+      imageUrl: "https://cdn.example.com/cat.jpg",
+    });
+    const web = createWebModule(new Map(), 0);
+    const ctx = makeContext();
+
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "look https://cdn.example.com/cat.jpg"],
+    });
+
+    const html = web.buildChannelMessagesPage(
+      "#general",
+      "",
+      "apricot",
+      buildWebUiSettings({ enableInlineUrlPreview: true })
+    );
+
+    expect(html).toContain("url-embed-container");
+    expect(html).toContain('src="https://cdn.example.com/cat.jpg"');
+    expect(html).not.toContain('id="url-preview-popup"');
+  });
+
+  it("renders hover and long-press preview hooks when inline preview is disabled", async () => {
+    resolveMessageEmbedMock.mockResolvedValue({
+      kind: "card",
+      sourceUrl: "https://example.com/post",
+      imageUrl: "https://example.com/card.jpg",
+      title: "Example title",
+      siteName: "Example",
+    });
+    const web = createWebModule(new Map(), 0);
+    const ctx = makeContext();
+
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "look https://example.com/post"],
+    });
+
+    const html = web.buildChannelMessagesPage(
+      "#general",
+      "",
+      "apricot",
+      buildWebUiSettings({ enableInlineUrlPreview: false })
+    );
+
+    expect(html).toContain('data-preview-kind="card"');
+    expect(html).toContain('data-preview-title="Example title"');
+    expect(html).toContain('id="url-preview-popup"');
+    expect(html).toContain("pointerdown");
+    expect(html).not.toContain("url-embed-container");
   });
 
   it("highlights registered keywords in message text with keyword-hl span", async () => {

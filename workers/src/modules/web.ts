@@ -20,6 +20,10 @@ import CHANNEL_MESSAGES_TEMPLATE from "../templates/channel-messages.html";
 import CHANNEL_COMPOSER_TEMPLATE from "../templates/channel-composer.html";
 import CHANNEL_LIST_TEMPLATE from "../templates/channel-list.html";
 import SETTINGS_TEMPLATE from "../templates/settings.html";
+import {
+  resolveMessageEmbed,
+  type ResolvedUrlEmbed,
+} from "./url-metadata";
 
 // ---------------------------------------------------------------------------
 // Message storage
@@ -30,6 +34,7 @@ export interface StoredMessage {
   type: "privmsg" | "notice" | "join" | "part" | "quit" | "kick" | "nick" | "topic" | "mode" | "self";
   nick: string;
   text: string;
+  embed?: ResolvedUrlEmbed;
 }
 
 /**
@@ -61,6 +66,7 @@ export interface WebUiSettings extends WebUiColorSettings {
   extraCss: string;
   highlightKeywords: string;
   dimKeywords: string;
+  enableInlineUrlPreview: boolean;
 }
 
 const DEFAULT_maxLines = 200;
@@ -105,6 +111,7 @@ export const DEFAULT_WEB_UI_SETTINGS: WebUiSettings = {
   extraCss: "",
   highlightKeywords: "",
   dimKeywords: "",
+  enableInlineUrlPreview: false,
 };
 
 type MessageBufferStore = Map<string, StoredMessage[]>;
@@ -283,6 +290,161 @@ function parseKeywords(raw: string): string[] {
   return raw.split(/[\n,]/).map((k) => k.trim()).filter((k) => k.length > 0);
 }
 
+function renderEmbedDataAttributes(embed: ResolvedUrlEmbed): string {
+  const attrs = [
+    `data-preview-kind="${escapeHtml(embed.kind)}"`,
+    `data-preview-source-url="${escapeHtml(embed.sourceUrl)}"`,
+    `data-preview-image-url="${escapeHtml(embed.imageUrl)}"`,
+  ];
+  if (embed.title) {
+    attrs.push(`data-preview-title="${escapeHtml(embed.title)}"`);
+  }
+  if (embed.siteName) {
+    attrs.push(`data-preview-site-name="${escapeHtml(embed.siteName)}"`);
+  }
+  return attrs.join(" ");
+}
+
+function renderUrlEmbed(embed: ResolvedUrlEmbed, variant: "inline" | "popup"): string {
+  const embedClass = variant === "inline" ? "url-embed url-embed--inline" : "url-embed url-embed--popup";
+  const imageClass = embed.kind === "image" ? "url-embed__image url-embed__image--full" : "url-embed__image";
+  const siteNameHtml = embed.siteName
+    ? `<span class="url-embed__site">${escapeHtml(embed.siteName)}</span>`
+    : "";
+  const titleHtml = embed.title
+    ? `<span class="url-embed__title">${escapeHtml(embed.title)}</span>`
+    : "";
+  const metaHtml = siteNameHtml || titleHtml
+    ? `<span class="url-embed__meta">${siteNameHtml}${titleHtml}</span>`
+    : "";
+
+  return `<a href="${escapeHtml(embed.sourceUrl)}" target="_blank" rel="noopener" class="${embedClass}">
+    <img src="${escapeHtml(embed.imageUrl)}" alt="${embed.title ? escapeHtml(embed.title) : "URL preview"}" class="${imageClass}" loading="lazy">
+    ${metaHtml}
+  </a>`;
+}
+
+function buildPreviewScript(): string {
+  return `var popup = document.getElementById("url-preview-popup");
+if (popup) {
+  var popupImage = popup.querySelector("[data-preview-popup-image]");
+  var popupSite = popup.querySelector("[data-preview-popup-site]");
+  var popupTitle = popup.querySelector("[data-preview-popup-title]");
+  var hoverCapable = window.matchMedia && window.matchMedia("(hover: hover)").matches;
+  var longPressTimer = 0;
+  var longPressHandled = false;
+  var activeLink = null;
+
+  function fillPopup(link) {
+    if (!popupImage || !popupSite || !popupTitle) {
+      return;
+    }
+    popupImage.setAttribute("src", link.dataset.previewImageUrl || "");
+    popupImage.setAttribute("alt", link.dataset.previewTitle || "URL preview");
+    popupImage.className = link.dataset.previewKind === "image"
+      ? "url-embed__image url-embed__image--full"
+      : "url-embed__image";
+    popupSite.textContent = link.dataset.previewSiteName || "";
+    popupTitle.textContent = link.dataset.previewTitle || "";
+    popup.classList.toggle("url-preview-popup--card", link.dataset.previewKind !== "image");
+  }
+
+  function positionPopup(link) {
+    var rect = link.getBoundingClientRect();
+    popup.style.left = "0px";
+    popup.style.top = "0px";
+    popup.hidden = false;
+    var popupRect = popup.getBoundingClientRect();
+    var left = Math.max(8, Math.min(rect.left, window.innerWidth - popupRect.width - 8));
+    var top = rect.bottom + 8;
+    if (top + popupRect.height > window.innerHeight - 8) {
+      top = Math.max(8, rect.top - popupRect.height - 8);
+    }
+    popup.style.left = left + "px";
+    popup.style.top = top + "px";
+  }
+
+  function showPopup(link) {
+    activeLink = link;
+    fillPopup(link);
+    positionPopup(link);
+  }
+
+  function hidePopup() {
+    activeLink = null;
+    popup.hidden = true;
+  }
+
+  function clearLongPressTimer() {
+    if (longPressTimer) {
+      window.clearTimeout(longPressTimer);
+      longPressTimer = 0;
+    }
+  }
+
+  var links = document.querySelectorAll("a[data-preview-kind]");
+  links.forEach(function (link) {
+    if (hoverCapable) {
+      link.addEventListener("mouseenter", function () {
+        showPopup(link);
+      });
+      link.addEventListener("mouseleave", function () {
+        if (activeLink === link) {
+          hidePopup();
+        }
+      });
+    }
+
+    link.addEventListener("focus", function () {
+      showPopup(link);
+    });
+    link.addEventListener("blur", function () {
+      if (activeLink === link) {
+        hidePopup();
+      }
+    });
+
+    link.addEventListener("pointerdown", function (event) {
+      if (event.pointerType === "mouse") {
+        return;
+      }
+      longPressHandled = false;
+      clearLongPressTimer();
+      longPressTimer = window.setTimeout(function () {
+        longPressHandled = true;
+        showPopup(link);
+      }, 450);
+    });
+
+    link.addEventListener("pointerup", clearLongPressTimer);
+    link.addEventListener("pointercancel", clearLongPressTimer);
+    link.addEventListener("pointermove", clearLongPressTimer);
+    link.addEventListener("click", function (event) {
+      if (longPressHandled) {
+        event.preventDefault();
+        longPressHandled = false;
+      }
+    });
+  });
+
+  document.addEventListener("pointerdown", function (event) {
+    if (!(event.target instanceof Element)) {
+      return;
+    }
+    if (popup.contains(event.target)) {
+      return;
+    }
+    if (event.target.closest("a[data-preview-kind]")) {
+      return;
+    }
+    hidePopup();
+  });
+
+  window.addEventListener("scroll", hidePopup, { passive: true });
+  window.addEventListener("resize", hidePopup);
+}`;
+}
+
 /**
  * Escape text for HTML, linkifying any URLs found in the raw string.
  * Also wraps any matched highlightKeywords in <span class="keyword-hl">.
@@ -291,7 +453,12 @@ function parseKeywords(raw: string): string[] {
  * attribute contains the real URL (not &amp;-encoded).  The surrounding
  * non-URL text and the link label are then HTML-escaped safely.
  */
-function renderText(raw: string, highlightKeywords: string[] = []): string {
+function renderText(
+  raw: string,
+  highlightKeywords: string[] = [],
+  embed?: ResolvedUrlEmbed,
+  enablePopupPreview = false,
+): string {
   const urlRe = /(https?:\/\/[^\s<>"]+)/g;
   let result = "";
   let last = 0;
@@ -302,7 +469,10 @@ function renderText(raw: string, highlightKeywords: string[] = []): string {
     const url = m[1];
     let hostname: string;
     try { hostname = new URL(url).hostname; } catch { hostname = url; }
-    result += `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${escapeHtml(hostname)}</a>`;
+    const previewAttrs = enablePopupPreview && embed?.sourceUrl === url
+      ? ` class="url-link url-link--preview" ${renderEmbedDataAttributes(embed)}`
+      : ' class="url-link"';
+    result += `<a href="${escapeHtml(url)}" target="_blank" rel="noopener"${previewAttrs}>${escapeHtml(hostname)}</a>`;
     last = m.index + url.length;
   }
   result += escapeHtml(raw.slice(last));
@@ -327,18 +497,28 @@ function formatTime(ms: number, offsetHours: number): string {
   return `${hh}:${mm}`;
 }
 
-function renderMessage(m: StoredMessage, selfNick: string, offsetHours: number, highlightKeywords: string[] = []): string {
+function renderMessage(
+  m: StoredMessage,
+  selfNick: string,
+  offsetHours: number,
+  highlightKeywords: string[] = [],
+  webUiSettings: WebUiSettings = DEFAULT_WEB_UI_SETTINGS,
+): string {
   const ts = `<span class="timestamp">${formatTime(m.time, offsetHours)}</span>`;
   const isSelf = m.nick.toLowerCase() === selfNick.toLowerCase();
   const nickClass = isSelf ? "username-self" : "username-other";
+  const canUsePopupPreview = !webUiSettings.enableInlineUrlPreview && Boolean(m.embed);
+  const inlineEmbedHtml = webUiSettings.enableInlineUrlPreview && m.embed
+    ? `<div class="url-embed-container">${renderUrlEmbed(m.embed, "inline")}</div>`
+    : "";
 
   switch (m.type) {
     case "privmsg":
-      return `${ts} <span class="${nickClass}">${escapeHtml(m.nick)}&gt;</span> ${renderText(m.text, highlightKeywords)}`;
+      return `${ts} <span class="${nickClass}">${escapeHtml(m.nick)}&gt;</span> ${renderText(m.text, highlightKeywords, m.embed, canUsePopupPreview)}${inlineEmbedHtml}`;
     case "notice":
-      return `${ts} <span class="${nickClass}">(${escapeHtml(m.nick)})</span> ${renderText(m.text, highlightKeywords)}`;
+      return `${ts} <span class="${nickClass}">(${escapeHtml(m.nick)})</span> ${renderText(m.text, highlightKeywords, m.embed, canUsePopupPreview)}${inlineEmbedHtml}`;
     case "self":
-      return `${ts} <span class="username-self">${escapeHtml(m.nick)}&gt;</span> ${renderText(m.text, highlightKeywords)}`;
+      return `${ts} <span class="username-self">${escapeHtml(m.nick)}&gt;</span> ${renderText(m.text, highlightKeywords, m.embed, canUsePopupPreview)}${inlineEmbedHtml}`;
     case "join":
       return `${ts} <span class="timestamp">*** ${escapeHtml(m.nick)} has joined ${escapeHtml(m.text)}</span>`;
     case "part":
@@ -354,7 +534,7 @@ function renderMessage(m: StoredMessage, selfNick: string, offsetHours: number, 
     case "mode":
       return `${ts} <span class="timestamp">*** ${escapeHtml(m.nick)} sets mode ${escapeHtml(m.text)}</span>`;
     default:
-      return `${ts} ${renderText(m.text, highlightKeywords)}`;
+      return `${ts} ${renderText(m.text, highlightKeywords, m.embed, canUsePopupPreview)}${inlineEmbedHtml}`;
   }
 }
 
@@ -459,6 +639,7 @@ export function buildSettingsPage(
     .replace("{{COLOR_FIELDS}}", colorFieldsHtml)
     .replace("{{DISPLAY_ORDER_ASC_CHECKED}}", isAscendingOrder ? "checked" : "")
     .replace("{{DISPLAY_ORDER_DESC_CHECKED}}", isAscendingOrder ? "" : "checked")
+    .replace("{{ENABLE_INLINE_URL_PREVIEW_CHECKED}}", webUiSettings.enableInlineUrlPreview ? "checked" : "")
     .replace("{{EXTRA_CSS}}", escapeHtml(webUiSettings.extraCss))
     .replace("{{HIGHLIGHT_KEYWORDS}}", escapeHtml(webUiSettings.highlightKeywords))
     .replace("{{DIM_KEYWORDS}}", escapeHtml(webUiSettings.dimKeywords))
@@ -518,13 +699,28 @@ export function createWebModule(
     await persistSnapshot();
   }
 
+  async function buildTextMessage(
+    type: "privmsg" | "notice" | "self",
+    nick: string,
+    text: string,
+    embed?: ResolvedUrlEmbed,
+  ): Promise<StoredMessage> {
+    return {
+      time: Date.now(),
+      type,
+      nick,
+      text,
+      embed: embed ?? await resolveMessageEmbed(text),
+    };
+  }
+
   const module = defineModule("web", (m) => {
     m.on("ss_privmsg", async (_ctx, msg) => {
       const nick = msg.prefix ? extractNick(msg.prefix) : "?";
       const target = msg.params[0];
       const text = msg.params[1] || "";
       const channel = isChannel(target) ? target : nick; // DM keyed by sender nick
-      await appendMessage(channel, { time: Date.now(), type: "privmsg", nick, text });
+      await appendMessage(channel, await buildTextMessage("privmsg", nick, text));
       return msg;
     });
 
@@ -533,7 +729,7 @@ export function createWebModule(
       const target = msg.params[0];
       const text = msg.params[1] || "";
       const channel = isChannel(target) ? target : nick;
-      await appendMessage(channel, { time: Date.now(), type: "notice", nick, text });
+      await appendMessage(channel, await buildTextMessage("notice", nick, text));
       return msg;
     });
 
@@ -656,23 +852,38 @@ export function createWebModule(
         const isDimmed = dimKeywordList.length > 0 &&
           dimKeywordList.some((kw) => msg.text.toLowerCase().includes(kw.toLowerCase()));
         const divAttrs = isDimmed ? ' class="msg-dimmed"' : "";
-        return `<div${divAttrs}>${renderMessage(msg, selfNick, timezoneOffset, hlKeywords)}</div>`;
+        return `<div${divAttrs}>${renderMessage(msg, selfNick, timezoneOffset, hlKeywords, webUiSettings)}</div>`;
       })
       .join("\n");
+    const popupHtml = webUiSettings.enableInlineUrlPreview
+      ? ""
+      : `<div id="url-preview-popup" class="url-preview-popup" hidden>
+  <div class="url-embed url-embed--popup">
+    <img data-preview-popup-image src="" alt="URL preview" class="url-embed__image" loading="lazy">
+    <span class="url-embed__meta">
+      <span data-preview-popup-site class="url-embed__site"></span>
+      <span data-preview-popup-title class="url-embed__title"></span>
+    </span>
+  </div>
+</div>`;
     const reloadButton = webUiSettings.displayOrder === "desc"
       ? '<button type="button" class="floating" onclick="location.reload();">再読込</button>'
       : "";
-    const autoScrollScript = webUiSettings.displayOrder === "asc"
-      ? "var root = document.scrollingElement || document.documentElement; window.scrollTo(0, root.scrollHeight);"
-      : "";
+    const scriptParts: string[] = [];
+    if (webUiSettings.displayOrder === "asc") {
+      scriptParts.push("var root = document.scrollingElement || document.documentElement; window.scrollTo(0, root.scrollHeight);");
+    }
+    if (!webUiSettings.enableInlineUrlPreview) {
+      scriptParts.push(buildPreviewScript());
+    }
 
     return CHANNEL_MESSAGES_TEMPLATE
       .replace("{{CSS}}", buildChannelCss(webUiSettings))
       .replace("{{CHANNEL}}", escapeHtml(channel))
       .replace("{{TOPIC}}", escapeHtml(topic))
       .replace("{{RELOAD_BUTTON}}", reloadButton)
-      .replace("{{AUTO_SCROLL_SCRIPT}}", autoScrollScript)
-      .replace("{{MESSAGES}}", lines);
+      .replace("{{AUTO_SCROLL_SCRIPT}}", scriptParts.join("\n"))
+      .replace("{{MESSAGES}}", lines + popupHtml);
   }
 
   function buildChannelComposerPage(
@@ -707,8 +918,13 @@ if (frame && frame.contentWindow) {
   /**
    * Adds a locally generated message and persists the latest snapshot.
    */
-  async function recordSelfMessage(channel: string, nick: string, text: string): Promise<void> {
-    await appendMessage(channel, { time: Date.now(), type: "self", nick, text });
+  async function recordSelfMessage(
+    channel: string,
+    nick: string,
+    text: string,
+    embed?: ResolvedUrlEmbed,
+  ): Promise<void> {
+    await appendMessage(channel, await buildTextMessage("self", nick, text, embed));
   }
 
   function getChannelTopic(channel: string): string {

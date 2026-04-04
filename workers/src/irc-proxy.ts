@@ -23,7 +23,11 @@ import {
   type WebUiColorSettings,
   type WebUiSettings,
 } from "./modules/web";
-import { extractUrlMetadata } from "./modules/url-metadata";
+import {
+  extractUrlMetadata,
+  resolveUrlEmbed,
+  type ResolvedUrlEmbed,
+} from "./modules/url-metadata";
 import { buildProxyConfigFromEnv, type ProxyConfig } from "./proxy-config";
 import { escapeUnsupportedIrcText } from "./irc-text-escape";
 import LOGIN_TEMPLATE from "./templates/login.html";
@@ -507,9 +511,16 @@ export class IrcProxyDO implements DurableObject {
     }
 
     let text = body.message || "";
+    let embed: ResolvedUrlEmbed | undefined;
 
     // URL metadata extraction mode
     if (!text && body.url) {
+      try {
+        embed = await resolveUrlEmbed(body.url);
+      } catch {
+        embed = undefined;
+      }
+
       try {
         text = await extractUrlMetadata(body.url);
       } catch {
@@ -531,7 +542,7 @@ export class IrcProxyDO implements DurableObject {
       );
     }
 
-    const postResult = await this.postChannelMessage(channel, text);
+    const postResult = await this.postChannelMessage(channel, text, embed);
     if (!postResult.ok) {
       return Response.json(
         { error: postResult.error },
@@ -783,7 +794,8 @@ export class IrcProxyDO implements DurableObject {
 
   private async postChannelMessage(
     channel: string | undefined,
-    message: string | undefined
+    message: string | undefined,
+    embed?: ResolvedUrlEmbed,
   ): Promise<
     | { ok: true; message: string; channel: string }
     | { ok: false; error: string; status: number }
@@ -809,7 +821,7 @@ export class IrcProxyDO implements DurableObject {
       params: [targetChannel, serverMessage],
     });
 
-    await this.web.recordSelfMessage(targetChannel, this.nick, trimmedMessage);
+    await this.web.recordSelfMessage(targetChannel, this.nick, trimmedMessage, embed);
 
     this.broadcast({
       prefix: `${this.nick}!proxy@apricot`,
@@ -1297,6 +1309,7 @@ export class IrcProxyDO implements DurableObject {
       };
     }
     draftSettings.dimKeywords = dimKeywords;
+    draftSettings.enableInlineUrlPreview = formData.get("enableInlineUrlPreview") !== null;
 
     return {
       settings: buildWebUiSettings(draftSettings),
@@ -1329,6 +1342,9 @@ export class IrcProxyDO implements DurableObject {
     const dimKeywords = typeof stored.dimKeywords === "string" && stored.dimKeywords.length <= 2048
       ? stored.dimKeywords
       : DEFAULT_WEB_UI_SETTINGS.dimKeywords;
+    const enableInlineUrlPreview = typeof stored.enableInlineUrlPreview === "boolean"
+      ? stored.enableInlineUrlPreview
+      : DEFAULT_WEB_UI_SETTINGS.enableInlineUrlPreview;
 
     return buildWebUiSettings({
       fontFamily,
@@ -1350,6 +1366,7 @@ export class IrcProxyDO implements DurableObject {
       extraCss,
       highlightKeywords,
       dimKeywords,
+      enableInlineUrlPreview,
     });
   }
 

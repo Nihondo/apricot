@@ -282,6 +282,13 @@
   color: var(--ds-text-subtle);
 }
 
+.admin-checkbox-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ds-text);
+}
+
 .admin-form__actions {
   display: flex;
   justify-content: flex-end;

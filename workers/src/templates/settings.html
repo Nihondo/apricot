@@ -52,6 +52,11 @@
         <label class="admin-radio-option"><input type="radio" name="displayOrder" value="asc" {{DISPLAY_ORDER_ASC_CHECKED}}> 古い順</label>
         <label class="admin-radio-option"><input type="radio" name="displayOrder" value="desc" {{DISPLAY_ORDER_DESC_CHECKED}}> 新しい順</label>
       </fieldset>
+      <label class="admin-checkbox-option">
+        <input type="checkbox" name="enableInlineUrlPreview" value="1" {{ENABLE_INLINE_URL_PREVIEW_CHECKED}}>
+        <span>URLプレビューを本文下に常時表示する</span>
+      </label>
+      <p class="admin-section-description">OFF の場合も、対応する URL リンクでは PC の hover / focus とタッチ端末の長押し相当でプレビューできます。</p>
       <label class="admin-field">
         <span class="admin-field__label">強調したいキーワード (1行に1語)</span>
         <textarea name="highlightKeywords" rows="4" class="admin-textarea" placeholder="強調したいキーワードを1行に1つ入力">{{HIGHLIGHT_KEYWORDS}}</textarea>

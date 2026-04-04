@@ -1,7 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+const { extractUrlMetadataMock, resolveMessageEmbedMock, resolveUrlEmbedMock } = vi.hoisted(() => ({
+  extractUrlMetadataMock: vi.fn(),
+  resolveMessageEmbedMock: vi.fn(),
+  resolveUrlEmbedMock: vi.fn(),
+}));
 
 vi.mock("cloudflare:sockets", () => ({
   connect: vi.fn(),
+}));
+vi.mock("../../src/modules/url-metadata", () => ({
+  extractUrlMetadata: extractUrlMetadataMock,
+  resolveMessageEmbed: resolveMessageEmbedMock,
+  resolveUrlEmbed: resolveUrlEmbedMock,
 }));
 vi.mock("../../src/templates/admin-style.css", () => ({ default: "ADMIN_CSS" }));
 vi.mock("../../src/templates/style.css", () => ({ default: "" }));
@@ -21,7 +32,7 @@ vi.mock("../../src/templates/login.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{ERROR}}<form action=\"{{ACTION_URL}}\" method=\"POST\"><input name=\"password\"></form></body></html>",
 }));
 vi.mock("../../src/templates/settings.html", () => ({
-  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}この設定はチャンネル画面にのみ適用されます。{{ERROR}}{{PRESET_CONTROLS}}<form action=\"{{ACTION_URL}}\" method=\"POST\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\">{{COLOR_FIELDS}}<textarea name=\"extraCss\">{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form>{{SETTINGS_SCRIPT}}</body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}この設定はチャンネル画面にのみ適用されます。{{ERROR}}{{PRESET_CONTROLS}}<form action=\"{{ACTION_URL}}\" method=\"POST\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\">{{COLOR_FIELDS}}<input type=\"checkbox\" name=\"enableInlineUrlPreview\" {{ENABLE_INLINE_URL_PREVIEW_CHECKED}}><textarea name=\"extraCss\">{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form>{{SETTINGS_SCRIPT}}</body></html>",
 }));
 
 import { IrcProxyDO } from "../../src/irc-proxy";
@@ -90,6 +101,15 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
 }
 
 describe("IrcProxyDO web log persistence", () => {
+  beforeEach(() => {
+    extractUrlMetadataMock.mockReset();
+    resolveMessageEmbedMock.mockReset();
+    resolveUrlEmbedMock.mockReset();
+    extractUrlMetadataMock.mockImplementation(async (url: string) => url);
+    resolveMessageEmbedMock.mockResolvedValue(undefined);
+    resolveUrlEmbedMock.mockResolvedValue(undefined);
+  });
+
   it("keeps web UI public when CLIENT_PASSWORD is not configured", async () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
@@ -318,6 +338,7 @@ describe("IrcProxyDO web log persistence", () => {
       extraCss: "body { color: blue; }",
       highlightKeywords: "",
       dimKeywords: "",
+      enableInlineUrlPreview: true,
     } satisfies WebUiSettings);
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
@@ -353,6 +374,8 @@ describe("IrcProxyDO web log persistence", () => {
     expect(html).toContain('name="borderColor"');
     expect(html).toContain('value="#654321"');
     expect(html).toContain('data-theme-preset="dark"');
+    expect(html).toContain('name="enableInlineUrlPreview"');
+    expect(html).toContain("checked");
   });
 
   it("fills missing theme fields from the light preset for legacy stored settings", async () => {
@@ -396,6 +419,7 @@ describe("IrcProxyDO web log persistence", () => {
     expect(html).toContain('value="#0B5FFF"');
     expect(html).toContain('name="buttonTextColor"');
     expect(html).toContain('value="#FFFFFF"');
+    expect(html).not.toMatch(/name="enableInlineUrlPreview"[^>]*checked/);
   });
 
   it("persists web UI settings and applies them across list, shell, messages, composer, and login pages", async () => {
@@ -440,6 +464,7 @@ describe("IrcProxyDO web log persistence", () => {
         "mutedTextColor=%23666666",
         "keywordColor=%23FF4400",
         "displayOrder=asc",
+        "enableInlineUrlPreview=1",
         "extraCss=body%20%7B%20color%3A%20blue%3B%20%7D",
         "highlightKeywords=hello%0Aworld",
         "dimKeywords=NickServ",
@@ -465,6 +490,7 @@ describe("IrcProxyDO web log persistence", () => {
       mutedTextColor: "#666666",
       keywordColor: "#FF4400",
       displayOrder: "asc",
+      enableInlineUrlPreview: true,
       extraCss: "body { color: blue; }",
       highlightKeywords: "hello\nworld",
       dimKeywords: "NickServ",
@@ -785,6 +811,58 @@ describe("IrcProxyDO web log persistence", () => {
       type: "self",
       nick: "apricot",
       text: "hello😀",
+    });
+  });
+
+  it("stores URL embed metadata for API url posts while keeping the generated message text", async () => {
+    extractUrlMetadataMock.mockResolvedValue("Example title https://example.com/post");
+    resolveUrlEmbedMock.mockResolvedValue({
+      kind: "card",
+      sourceUrl: "https://example.com/post",
+      imageUrl: "https://example.com/card.jpg",
+      title: "Example title",
+      siteName: "Example",
+    });
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const send = vi.fn().mockResolvedValue(undefined);
+    (proxy as any).serverConn = {
+      connected: true,
+      send,
+    };
+    (proxy as any).nick = "apricot";
+
+    const response = await proxy.fetch(new Request("https://example.com/api/post", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ channel: "#general", url: "https://example.com/post" }),
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      channel: "#general",
+      message: "Example title https://example.com/post",
+    });
+    const logs = state.storage.read<PersistedWebLogs>(webLogsStorageKey);
+    expect(logs?.["#general"]?.at(-1)).toMatchObject({
+      type: "self",
+      nick: "apricot",
+      text: "Example title https://example.com/post",
+      embed: {
+        kind: "card",
+        sourceUrl: "https://example.com/post",
+        imageUrl: "https://example.com/card.jpg",
+        title: "Example title",
+        siteName: "Example",
+      },
     });
   });
 

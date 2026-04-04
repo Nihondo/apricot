@@ -12,6 +12,7 @@ Cloudflare Workers + Durable Objects で動作します。
 - WebSocket 対応 IRC クライアントからの接続
 - REST API 経由での操作（チャンネル参加・メッセージ投稿・nick 変更）
 - URL 投稿時のページタイトル自動取得（Twitter/X oEmbed 対応）
+- Web UI の URL 画像 / カードプレビュー（常時表示または hover / 長押し）
 
 ---
 
@@ -190,7 +191,7 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/post \
 
 #### URL のメタデータを取得して投稿する
 
-`message` の代わりに `url` を指定すると、ページタイトルを取得して投稿します:
+`message` の代わりに `url` を指定すると、ページタイトルを取得して投稿します。Web UI では、同じ URL から画像 / カードプレビューも保存されます:
 
 ```bash
 curl -X POST http://localhost:8787/proxy/myproxy/api/post \
@@ -202,6 +203,13 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/post \
 - **Twitter/X URL**: oEmbed API でツイート本文と著者名を取得
 - **一般 URL**: HTML の `<title>` タグを取得（最初の 32KB のみ読み込み）
 - フォールバック: URL をそのまま投稿
+
+Web UI の URL プレビュー優先順位:
+
+1. 画像直リンクならそのままインライン画像として扱う
+2. YouTube URL ならサムネイル画像を生成する
+3. それ以外は `og:image` → `twitter:image` → JSON oEmbed の順で画像を探す
+4. 画像が見つからなければプレビューは表示しない
 
 リクエストボディ:
 
@@ -246,7 +254,7 @@ curl http://localhost:8787/proxy/myproxy/api/logs/%23general
   "channel": "#general",
   "messages": [
     {"time": 1712160000000, "type": "privmsg", "nick": "alice", "text": "hello!"},
-    {"time": 1712160010000, "type": "privmsg", "nick": "apricotbot", "text": "hi there"}
+    {"time": 1712160010000, "type": "privmsg", "nick": "apricotbot", "text": "hi there", "embed": {"kind": "card", "sourceUrl": "https://example.com/post", "imageUrl": "https://example.com/card.jpg", "title": "Example", "siteName": "example.com"}}
   ]
 }
 ```
@@ -259,8 +267,11 @@ curl http://localhost:8787/proxy/myproxy/api/logs/%23general
 | `type` | string | `privmsg` / `notice` / `join` / `part` / `quit` / `kick` / `nick` / `topic` / `mode` / `self` |
 | `nick` | string | 発言者 nick |
 | `text` | string | メッセージ本文（`nick` / `topic` 等では対象または新しい値） |
+| `embed` | object? | Web UI 用の URL プレビュー情報。`kind`, `sourceUrl`, `imageUrl`, `title?`, `siteName?` を含む |
 
 最大 200 件（時系列順）を返します。指定チャンネルのバッファが存在しない場合は `404` を返します。
+
+Web UI 設定画面では、URL プレビューを本文下に常時表示するかを切り替えられます。OFF の場合でも、対応する URL リンクでは PC の hover / focus とタッチ端末の長押し相当でプレビューできます。
 
 ### 複数ユーザで使うには
 
@@ -426,7 +437,7 @@ IRC クライアント (WebSocket)  ──→  Cloudflare Worker (index.ts)
 | `src/modules/channel-track.ts` | JOIN/PART/KICK/QUIT/NICK によるチャンネル状態追跡 |
 | `src/modules/client-sync.ts` | 新規クライアント接続時の状態リプレイ |
 | `src/modules/web.ts` | Web チャットインターフェース・メッセージバッファ・DO ストレージ永続化 |
-| `src/modules/url-metadata.ts` | URL メタデータ抽出（Twitter/X oEmbed・HTML title） |
+| `src/modules/url-metadata.ts` | URL メタデータ抽出と Web UI プレビュー解決（画像直リンク・YouTube・OGP / Twitter Card / oEmbed） |
 
 ### IRC 接続状態遷移
 
