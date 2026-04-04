@@ -133,11 +133,12 @@ export function buildChannelListPage(
   showLogout = false,
   displayOrder: "asc" | "desc" = "desc"
 ): string {
-  const chLinks = channels.length === 0
+  const joinForm = `<form action="${basePath}/join" method="POST" class="join-form"><input type="text" name="channel" placeholder="#channel" class="join-input" autocomplete="off"><button type="submit" class="join-button">Join</button></form>`;
+  const chLinks = (channels.length === 0
     ? "<p>No channels joined.</p>"
     : channels
-        .map((ch) => `<a href="${basePath}/${encodeURIComponent(ch)}">${escapeHtml(ch)}</a>`)
-        .join("\n");
+        .map((ch) => `<div class="channel-item"><a href="${basePath}/${encodeURIComponent(ch)}">${escapeHtml(ch)}</a><form action="${basePath}/leave" method="POST" style="display:inline;"><input type="hidden" name="channel" value="${escapeHtml(ch)}"><button type="submit" class="leave-button">×</button></form></div>`)
+        .join("\n")) + `\n${joinForm}`;
 
   const ascActive = displayOrder === "asc" ? "active" : "";
   const descActive = displayOrder === "desc" ? "active" : "";

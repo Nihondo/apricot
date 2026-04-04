@@ -241,6 +241,32 @@ export class IrcProxyDO implements DurableObject {
       });
     }
 
+    // POST /web/join — join a channel from web UI
+    if (request.method === "POST" && (url.pathname === "/web/join" || url.pathname === "/web/join/")) {
+      const formData = await request.formData();
+      const channel = (formData.get("channel") as string | null)?.trim() ?? "";
+      if (channel && this.serverConn?.connected) {
+        await this.serverConn.send({ command: "JOIN", params: [channel] });
+      }
+      return new Response(null, {
+        status: 302,
+        headers: { Location: `${webBase}/` },
+      });
+    }
+
+    // POST /web/leave — leave a channel from web UI
+    if (request.method === "POST" && (url.pathname === "/web/leave" || url.pathname === "/web/leave/")) {
+      const formData = await request.formData();
+      const channel = (formData.get("channel") as string | null)?.trim() ?? "";
+      if (channel && this.serverConn?.connected) {
+        await this.serverConn.send({ command: "PART", params: [channel] });
+      }
+      return new Response(null, {
+        status: 302,
+        headers: { Location: `${webBase}/` },
+      });
+    }
+
     // GET /web — channel list
     if (url.pathname === "/web" || url.pathname === "/web/") {
       const displayOrder = this.getDisplayOrder(request);

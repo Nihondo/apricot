@@ -67,6 +67,16 @@ a:hover { text-decoration: underline; }
   position: fixed; left: 0; z-index: 2;
   width: 100%;
 }
+/* フォーカス時にアウトラインを一旦消す */
+input:focus,
+textarea:focus {
+  outline: none;
+}
+input:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--border-color);
+  outline-offset: 2px;
+}
 .top { top: 0; }
 .bottom { bottom: 0; }
 .message-input {
@@ -101,7 +111,36 @@ a:hover { text-decoration: underline; }
   cursor: pointer;
 }
 .channel-list { padding: 10px; }
-.channel-list a { display: block; margin: 4px 0; font-size: 1.1em; }
+.channel-item { display: flex; align-items: center; margin: 4px 0; }
+.channel-item a { flex: 1; font-size: 1.1em; }
+.leave-button {
+  -webkit-appearance: none; appearance: none;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--accent-username);
+  padding: 2px 8px;
+  cursor: pointer;
+  font-size: 0.9em;
+  flex-shrink: 0;
+}
+.join-form { display: flex; margin-top: 10px; gap: 4px; }
+.join-input {
+  -webkit-appearance: none; appearance: none;
+  flex: 1; height: 36px;
+  font-size: 1em;
+  color: var(--textcolor);
+  background-color: var(--rowcolor0);
+  border: 1px solid var(--border-color);
+  padding: 0 8px;
+}
+.join-button {
+  -webkit-appearance: none; appearance: none;
+  height: 36px; padding: 0 12px;
+  font-size: 1em; font-weight: bold;
+  border: none; cursor: pointer;
+  color: var(--button-fg);
+  background-color: var(--button-bg);
+}
 .status-bar {
   padding: 4px 8px;
   font-size: 0.85em;
