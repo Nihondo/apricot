@@ -647,7 +647,7 @@ export function createWebModule(
     shouldReloadMessages = false
   ): string {
     const actionUrl = `${basePath}/${encodeURIComponent(channel)}/composer`;
-    const channelListLink = `<a href="${basePath}/" class="channel-list-link" aria-label="チャンネル一覧へ戻る" title="チャンネル一覧へ戻る">☰</a>`;
+    const channelListLink = `<a href="${basePath}/" target="_top" class="channel-list-link" aria-label="チャンネル一覧へ戻る" title="チャンネル一覧へ戻る">☰</a>`;
     const flashHtml = renderFlashMessage(flashMessage, flashTone);
     const onLoadScript = shouldReloadMessages
       ? `var frame = window.parent && window.parent.document.getElementById("channel-messages-frame");

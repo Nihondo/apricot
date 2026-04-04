@@ -110,8 +110,10 @@ http://localhost:8787/proxy/myproxy/web/
 - メッセージは最新 `WEB_LOG_MAX_LINES` 件をインメモリに保持（デフォルト 200 件、新しい順に表示）
 - Durable Object storage にもログを保存し、DO 再起動後も再接続で表示を復元
 - チャンネル画面は shell + messages + composer の iframe 2 分割で構成
+- composer の `☰` は下フレーム内ではなく、同じタブ全体をチャンネル一覧へ戻す
 - 30 秒ごとの自動リフレッシュは messages フレームだけで実行
 - `displayOrder=asc`（古い順）では初期表示時に最下部まで自動スクロール
+- メッセージ入力欄は `displayOrder=asc` で画面下、`displayOrder=desc` で画面上に吸着して表示
 - URL は自動リンク化
 - `TIMEZONE_OFFSET` で時刻表示のタイムゾーンを設定可能（デフォルト UTC）
 - チャンネル一覧、設定画面、ログイン画面は固定のモダンUIで表示

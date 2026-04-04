@@ -207,6 +207,7 @@ describe("createWebModule", () => {
 
     expect(html).toContain('action="/proxy/main/web/%23general/composer"');
     expect(html).toContain('href="/proxy/main/web/"');
+    expect(html).toContain('target="_top"');
     expect(html).toContain("☰");
     expect(html).toContain('value="draft"');
     expect(html).toContain("送信失敗");
