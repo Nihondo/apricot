@@ -489,6 +489,7 @@ export function createWebModule(
       .join("\n");
 
     const actionUrl = `${basePath}/${encodeURIComponent(channel)}`;
+    const channelListLink = `<a href="${basePath}/" class="channel-list-link" aria-label="Back to channels" title="Back to channels">☰</a>`;
     const inputBarPosition = webUiSettings.displayOrder === "asc" ? "bottom" : "top";
     const reloadButton = webUiSettings.displayOrder === "desc"
       ? '<button type="button" class="floating" onclick="location.reload();">Reload</button>'
@@ -506,6 +507,7 @@ export function createWebModule(
       .replace("{{CHANNEL}}", escapeHtml(channel))
       .replace("{{TOPIC}}", escapeHtml(topic))
       .replace("{{ACTION_URL}}", actionUrl)
+      .replace("{{CHANNEL_LIST_LINK}}", channelListLink)
       .replace("{{INPUT_BAR_POSITION}}", inputBarPosition)
       .replace("{{RELOAD_BUTTON}}", reloadButton)
       .replace("{{CONTENT_PADDING}}", contentPadding)

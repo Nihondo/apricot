@@ -4,7 +4,7 @@ import type { ModuleContext } from "../module-system";
 vi.mock("../templates/admin-style.css", () => ({ default: "ADMIN_CSS" }));
 vi.mock("../templates/style.css", () => ({ default: "" }));
 vi.mock("../templates/channel.html", () => ({
-  default: "<html><body>{{INPUT_BAR_POSITION}}{{RELOAD_BUTTON}}{{CONTENT_PADDING}}<h1>{{CHANNEL}}</h1><div>{{TOPIC}}</div><form action=\"{{ACTION_URL}}\"></form>{{MESSAGES}}</body></html>",
+  default: "<html><body>{{INPUT_BAR_POSITION}}{{CHANNEL_LIST_LINK}}{{RELOAD_BUTTON}}{{CONTENT_PADDING}}<h1>{{CHANNEL}}</h1><div>{{TOPIC}}</div><form action=\"{{ACTION_URL}}\"></form>{{MESSAGES}}</body></html>",
 }));
 vi.mock("../templates/channel-list.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</body></html>",
@@ -124,6 +124,8 @@ describe("createWebModule", () => {
     const secondIdx = html.indexOf("second");
     expect(secondIdx).toBeLessThan(firstIdx); // 新しい順（secondが上）
     expect(html).toContain("top");
+    expect(html).toContain('href="/proxy/main/web/"');
+    expect(html).toContain("☰");
     expect(html).toContain("Reload");
     expect(html).toContain("padding-top:45px;");
   });
@@ -155,6 +157,8 @@ describe("createWebModule", () => {
     const secondIdx = html.indexOf("second");
     expect(firstIdx).toBeLessThan(secondIdx); // 古い順（firstが上）
     expect(html).toContain("bottom");
+    expect(html).toContain('href="/proxy/main/web/"');
+    expect(html).toContain("☰");
     expect(html).not.toContain("Reload");
     expect(html).toContain("padding-bottom:45px;");
   });

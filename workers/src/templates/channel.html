@@ -24,8 +24,10 @@ window.addEventListener('load', function () {
 <body>
 <div style="margin:5px;{{CONTENT_PADDING}}">
   <div class="input-bar {{INPUT_BAR_POSITION}}">
-    <form action="{{ACTION_URL}}" method="POST">
-      <input type="text" name="message" size="10" class="message-input" autocomplete="off"><input type="submit" value="OK" class="submit-button" onclick="sessionStorage.setItem('justPosted','true');">
+    <form action="{{ACTION_URL}}" method="POST" class="message-form">
+      {{CHANNEL_LIST_LINK}}
+      <input type="text" name="message" size="10" class="message-input" autocomplete="off">
+      <input type="submit" value="OK" class="submit-button" onclick="sessionStorage.setItem('justPosted','true');">
       {{RELOAD_BUTTON}}
     </form>
   </div>
