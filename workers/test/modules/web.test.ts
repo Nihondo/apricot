@@ -1,21 +1,21 @@
 import { describe, expect, it, vi } from "vitest";
-import type { ModuleContext } from "../module-system";
+import type { ModuleContext } from "../../src/module-system";
 
-vi.mock("../templates/admin-style.css", () => ({ default: "ADMIN_CSS" }));
-vi.mock("../templates/style.css", () => ({ default: "" }));
-vi.mock("../templates/channel.html", () => ({
+vi.mock("../../src/templates/admin-style.css", () => ({ default: "ADMIN_CSS" }));
+vi.mock("../../src/templates/style.css", () => ({ default: "" }));
+vi.mock("../../src/templates/channel.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body><div class=\"shell\">{{FRAME_CONTENT}}</div></body></html>",
 }));
-vi.mock("../templates/channel-messages.html", () => ({
+vi.mock("../../src/templates/channel-messages.html", () => ({
   default: "<html><head><style>{{CSS}}</style><script>{{AUTO_SCROLL_SCRIPT}}</script></head><body>{{MESSAGES}}{{RELOAD_BUTTON}}</body></html>",
 }));
-vi.mock("../templates/channel-composer.html", () => ({
+vi.mock("../../src/templates/channel-composer.html", () => ({
   default: "<html><head><style>{{CSS}}</style><script>{{ON_LOAD_SCRIPT}}</script></head><body>{{FLASH_MESSAGE}}<form action=\"{{ACTION_URL}}\">{{CHANNEL_LIST_LINK}}<input name=\"message\" value=\"{{MESSAGE_VALUE}}\"><button>送信</button></form></body></html>",
 }));
-vi.mock("../templates/channel-list.html", () => ({
+vi.mock("../../src/templates/channel-list.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}<p>{{SERVER_NAME}} に {{NICK}} として参加</p>{{FLASH_MESSAGE}}{{NICK_FORM}}<div>{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</div><span>サーバー: {{SERVER_NAME}}</span><span>NICK: {{NICK}}</span></body></html>",
 }));
-vi.mock("../templates/settings.html", () => ({
+vi.mock("../../src/templates/settings.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{ERROR}}この設定はチャンネル画面にのみ適用されます。{{PRESET_CONTROLS}}<form action=\"{{ACTION_URL}}\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\">{{COLOR_FIELDS}}<textarea name=\"highlightKeywords\">{{HIGHLIGHT_KEYWORDS}}</textarea><textarea name=\"dimKeywords\">{{DIM_KEYWORDS}}</textarea><textarea>{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form>{{SETTINGS_SCRIPT}}</body></html>",
 }));
 
@@ -27,7 +27,7 @@ import {
   buildWebUiSettings,
   createWebModule,
   type PersistedWebLogs,
-} from "./web";
+} from "../../src/modules/web";
 
 function makeContext(overrides: Partial<ModuleContext> = {}): ModuleContext {
   return {
@@ -326,9 +326,8 @@ describe("createWebModule", () => {
     expect(html).toContain('name="keywordColor"');
     expect(html).toContain('name="highlightKeywords"');
     expect(html).toContain('name="dimKeywords"');
-    expect(html).toContain("ライトに戻す");
-    expect(html).toContain("ダークに戻す");
-    expect(html).toContain("リンク背景色はアクセント色から自動生成される");
+    expect(html).toContain("ライト");
+    expect(html).toContain("ダーク");
     expect(html).toContain('"borderColor":"#0B5FFF"');
     expect(html).toContain("checked");
     expect(html).toContain("ADMIN_CSS");

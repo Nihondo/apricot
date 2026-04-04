@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildProxyConfigFromEnv, parseBooleanEnv, parsePorts } from "./proxy-config";
+import { buildProxyConfigFromEnv, parseBooleanEnv, parsePorts } from "../src/proxy-config";
 
 describe("parseBooleanEnv", () => {
   it("treats common truthy values as enabled", () => {

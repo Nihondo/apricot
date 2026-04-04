@@ -3,29 +3,29 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("cloudflare:sockets", () => ({
   connect: vi.fn(),
 }));
-vi.mock("../templates/admin-style.css", () => ({ default: "ADMIN_CSS" }));
-vi.mock("../templates/style.css", () => ({ default: "" }));
-vi.mock("../templates/channel.html", () => ({
+vi.mock("../../src/templates/admin-style.css", () => ({ default: "ADMIN_CSS" }));
+vi.mock("../../src/templates/style.css", () => ({ default: "" }));
+vi.mock("../../src/templates/channel.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body><div class=\"shell\">{{FRAME_CONTENT}}</div></body></html>",
 }));
-vi.mock("../templates/channel-messages.html", () => ({
+vi.mock("../../src/templates/channel-messages.html", () => ({
   default: "<html><head><style>{{CSS}}</style><script>{{AUTO_SCROLL_SCRIPT}}</script></head><body>{{MESSAGES}}{{RELOAD_BUTTON}}</body></html>",
 }));
-vi.mock("../templates/channel-composer.html", () => ({
+vi.mock("../../src/templates/channel-composer.html", () => ({
   default: "<html><head><style>{{CSS}}</style><script>{{ON_LOAD_SCRIPT}}</script></head><body>{{FLASH_MESSAGE}}<form action=\"{{ACTION_URL}}\" method=\"POST\">{{CHANNEL_LIST_LINK}}<input name=\"message\" value=\"{{MESSAGE_VALUE}}\"><button>送信</button></form></body></html>",
 }));
-vi.mock("../templates/channel-list.html", () => ({
+vi.mock("../../src/templates/channel-list.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{FLASH_MESSAGE}}{{NICK_FORM}}{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</body></html>",
 }));
-vi.mock("../templates/login.html", () => ({
+vi.mock("../../src/templates/login.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{ERROR}}<form action=\"{{ACTION_URL}}\" method=\"POST\"><input name=\"password\"></form></body></html>",
 }));
-vi.mock("../templates/settings.html", () => ({
+vi.mock("../../src/templates/settings.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}この設定はチャンネル画面にのみ適用されます。{{ERROR}}{{PRESET_CONTROLS}}<form action=\"{{ACTION_URL}}\" method=\"POST\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\">{{COLOR_FIELDS}}<textarea name=\"extraCss\">{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form>{{SETTINGS_SCRIPT}}</body></html>",
 }));
 
-import { IrcProxyDO } from "../irc-proxy";
-import type { PersistedWebLogs, WebUiSettings } from "./web";
+import { IrcProxyDO } from "../../src/irc-proxy";
+import type { PersistedWebLogs, WebUiSettings } from "../../src/modules/web";
 
 const webLogsStorageKey = "web:logs:v1";
 const webUiSettingsStorageKey = "web:ui-settings:v1";

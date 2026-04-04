@@ -3,14 +3,16 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("cloudflare:sockets", () => ({
   connect: vi.fn(),
 }));
-vi.mock("./templates/admin-style.css", () => ({ default: "" }));
-vi.mock("./templates/style.css", () => ({ default: "" }));
-vi.mock("./templates/channel.html", () => ({ default: "" }));
-vi.mock("./templates/channel-list.html", () => ({ default: "" }));
-vi.mock("./templates/login.html", () => ({ default: "" }));
-vi.mock("./templates/settings.html", () => ({ default: "" }));
+vi.mock("../src/templates/admin-style.css", () => ({ default: "" }));
+vi.mock("../src/templates/style.css", () => ({ default: "" }));
+vi.mock("../src/templates/channel.html", () => ({ default: "" }));
+vi.mock("../src/templates/channel-list.html", () => ({ default: "" }));
+vi.mock("../src/templates/channel-messages.html", () => ({ default: "" }));
+vi.mock("../src/templates/channel-composer.html", () => ({ default: "" }));
+vi.mock("../src/templates/login.html", () => ({ default: "" }));
+vi.mock("../src/templates/settings.html", () => ({ default: "" }));
 
-import worker from "./index";
+import worker from "../src/index";
 
 function makeEnv() {
   const fetch = vi.fn(async () => new Response("ok"));

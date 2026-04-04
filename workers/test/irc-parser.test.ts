@@ -4,7 +4,7 @@
  */
 
 import { describe, it, expect } from "vitest";
-import { parse, build, extractNick, isChannel } from "./irc-parser";
+import { parse, build, extractNick, isChannel } from "../src/irc-parser";
 
 // ---------------------------------------------------------------------------
 // parse()

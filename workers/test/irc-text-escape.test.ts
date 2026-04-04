@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { escapeUnsupportedIrcText } from "./irc-text-escape";
+import { escapeUnsupportedIrcText } from "../src/irc-text-escape";
 
 describe("escapeUnsupportedIrcText", () => {
   it("keeps utf-8 text unchanged", () => {
