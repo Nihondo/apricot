@@ -37,10 +37,16 @@ html { height: 100%; }
 body {
   font-family: "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
   line-height: 1.5;
+  --composer-frame-height: calc(3em + 2px);
   color: var(--textcolor);
   background-color: var(--rowcolor0);
   margin: 0;
   padding: 0;
+}
+@supports (height: 1lh) {
+  body {
+    --composer-frame-height: calc(2lh + 2px);
+  }
 }
 div { word-wrap: break-word; }
 .channel-messages-shell > div { padding: 0px 3px; }
@@ -70,8 +76,8 @@ hr { border: none; border-top: 1px solid var(--border-color); margin: 5px 0; }
   min-height: 0;
 }
 .channel-frame--composer {
-  flex: 0 0 40px;
-  height: 40px;
+  flex: 0 0 var(--composer-frame-height);
+  height: var(--composer-frame-height);
 }
 .channel-messages-page {
   padding: 5px;
@@ -117,7 +123,8 @@ input:focus { outline: none; }
   flex: 0 0 44px;
   width: 44px;
   min-width: 44px;
-  height: 40px;
+  height: 100%;
+  min-height: var(--composer-frame-height);
   margin: 0;
   padding: 0;
   border: none;
@@ -126,7 +133,7 @@ input:focus { outline: none; }
   color: var(--button-fg);
   font-size: 1.1em;
   font-weight: bold;
-  line-height: 1;
+  line-height: inherit;
   text-decoration: none;
 }
 .channel-list-link:hover,
@@ -137,8 +144,9 @@ input:focus { outline: none; }
   -webkit-appearance: none; appearance: none;
   flex: 1 1 auto;
   min-width: 0;
-  margin: 0; width: auto; height: 100%; min-height: 40px;
+  margin: 0; width: auto; height: 100%; min-height: var(--composer-frame-height);
   font-size: 1em;
+  line-height: inherit;
   color: var(--textcolor);
   background-color: var(--rowcolor0);
   border: 1px solid var(--border-color);
@@ -149,8 +157,9 @@ input:focus { outline: none; }
 .submit-button {
   -webkit-appearance: none; appearance: none;
   flex: 0 0 72px;
-  margin: 0; width: auto; height: 100%; min-height: 40px;
+  margin: 0; width: auto; height: 100%; min-height: var(--composer-frame-height);
   font-size: 1em; font-weight: bold;
+  line-height: inherit;
   border-radius: 0; vertical-align: middle;
   border: none;
   color: var(--button-fg);
