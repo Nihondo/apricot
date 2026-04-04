@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  extractUrlMetadata,
   resolveMessageEmbed,
   resolveUrlEmbed,
 } from "../../src/modules/url-metadata";
@@ -26,6 +27,27 @@ describe("url metadata resolver", () => {
       imageUrl: "https://cdn.example.com/cat.jpg",
     });
     expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("normalizes X oEmbed text before returning metadata", async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.startsWith("https://publish.twitter.com/oembed")) {
+        return Response.json({
+          author_name: "We don&#39;t deserve cats 😺",
+          html: "<blockquote><p>She adores her only baby.. pic.twitter.com/PlPzyKtKBc&mdash; We don&#39;t deserve cats 😺 (@catsareblessing) April 4, 2026</p></blockquote>",
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const metadata = await extractUrlMetadata("https://x.com/catsareblessing/status/2040275667414053299");
+
+    expect(metadata).toContain("XユーザーのWe don't deserve cats 😺さん");
+    expect(metadata).toContain("She adores her only baby.. pic.twitter.com/PlPzyKtKBc");
+    expect(metadata).not.toContain("&amp;#39;");
+    expect(metadata).not.toContain("&amp;mdash;");
+    expect(metadata).not.toContain("(@catsareblessing)");
   });
 
   it("resolves the first embeddable URL from a message", async () => {

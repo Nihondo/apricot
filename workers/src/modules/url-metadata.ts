@@ -101,17 +101,8 @@ async function extractTwitterMetadata(url: string): Promise<string> {
     html?: string;
   };
 
-  const authorName = data.author_name || "";
-  let text = "";
-
-  if (data.html) {
-    // Strip HTML tags
-    text = data.html.replace(/<[^>]*>/g, "");
-    // Remove everything after em-dash (twitter attribution)
-    text = text.replace(/\u2014.*$/, "").trim();
-    // Collapse whitespace
-    text = text.replace(/\s+/g, " ").trim();
-  }
+  const authorName = cleanMetadataText(data.author_name) || "";
+  const text = normalizeTwitterOEmbedText(data.html);
 
   if (text) {
     const result = `Xユーザーの${authorName}さん: 「${text}」 / X ${url}`;
@@ -402,9 +393,25 @@ function decodeHtmlEntities(value: string): string {
     .replace(/&lt;/g, "<")
     .replace(/&gt;/g, ">")
     .replace(/&quot;/g, "\"")
+    .replace(/&apos;/g, "'")
+    .replace(/&nbsp;/g, " ")
+    .replace(/&ndash;/g, "–")
+    .replace(/&mdash;/g, "—")
     .replace(/&#39;/g, "'")
     .replace(/&#x([0-9a-fA-F]+);/g, (_, hex) => String.fromCodePoint(Number.parseInt(hex, 16)))
     .replace(/&#(\d+);/g, (_, dec) => String.fromCodePoint(Number.parseInt(dec, 10)));
+}
+
+function normalizeTwitterOEmbedText(value?: string): string {
+  if (!value) {
+    return "";
+  }
+
+  const strippedText = value.replace(/<[^>]*>/g, "");
+  const cleanedText = cleanMetadataText(strippedText) || "";
+
+  // X oEmbed appends an attribution block after an em dash.
+  return cleanedText.replace(/\u2014.*$/, "").trim();
 }
 
 function cleanMetadataText(value?: string): string | undefined {
