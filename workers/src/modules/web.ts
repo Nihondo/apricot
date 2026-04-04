@@ -470,6 +470,85 @@ if (popup) {
 }`;
 }
 
+function buildConditionalAutoScrollScript(channel: string): string {
+  const storageKey = JSON.stringify(`apricot:scroll-stick:${channel.toLowerCase()}`);
+  return `var nearBottomThreshold = 48;
+var scrollStateStorageKey = ${storageKey};
+
+function getScrollRoot() {
+  return document.scrollingElement || document.documentElement;
+}
+
+function scrollToBottom() {
+  var root = getScrollRoot();
+  window.scrollTo(0, root.scrollHeight);
+}
+
+function isNearBottom() {
+  var root = getScrollRoot();
+  return root.scrollHeight - root.clientHeight - root.scrollTop <= nearBottomThreshold;
+}
+
+function readShouldStickToBottom() {
+  try {
+    return window.sessionStorage.getItem(scrollStateStorageKey) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeShouldStickToBottom(shouldStickToBottom) {
+  try {
+    window.sessionStorage.setItem(scrollStateStorageKey, shouldStickToBottom ? "1" : "0");
+  } catch {}
+}
+
+function scheduleBottomStick() {
+  scrollToBottom();
+  window.requestAnimationFrame(function () {
+    scrollToBottom();
+    window.requestAnimationFrame(scrollToBottom);
+  });
+  window.setTimeout(scrollToBottom, 120);
+}
+
+var shouldStickToBottom = readShouldStickToBottom();
+if (shouldStickToBottom) {
+  scheduleBottomStick();
+  document.querySelectorAll("img").forEach(function (image) {
+    if (image.complete) {
+      return;
+    }
+    image.addEventListener("load", scrollToBottom, { once: true });
+  });
+}
+
+window.addEventListener("beforeunload", function () {
+  writeShouldStickToBottom(isNearBottom());
+});`;
+}
+
+function buildComposerOnLoadScript(shouldReloadMessages: boolean): string {
+  const scriptLines = [
+    "function preventComposerScroll(event) {",
+    "  event.preventDefault();",
+    "}",
+    'window.addEventListener("wheel", preventComposerScroll, { passive: false });',
+    'window.addEventListener("touchmove", preventComposerScroll, { passive: false });',
+  ];
+
+  if (shouldReloadMessages) {
+    scriptLines.push(
+      'var frame = window.parent && window.parent.document.getElementById("channel-messages-frame");',
+      "if (frame && frame.contentWindow) {",
+      "  frame.contentWindow.location.reload();",
+      "}"
+    );
+  }
+
+  return scriptLines.join("\n");
+}
+
 /**
  * Escape text for HTML, linkifying any URLs found in the raw string.
  * Also wraps any matched highlightKeywords in <span class="keyword-hl">.
@@ -897,7 +976,7 @@ export function createWebModule(
       : "";
     const scriptParts: string[] = [];
     if (webUiSettings.displayOrder === "asc") {
-      scriptParts.push("var root = document.scrollingElement || document.documentElement; window.scrollTo(0, root.scrollHeight);");
+      scriptParts.push(buildConditionalAutoScrollScript(channel));
     }
     if (!webUiSettings.enableInlineUrlPreview) {
       scriptParts.push(buildPreviewScript());
@@ -924,12 +1003,7 @@ export function createWebModule(
     const actionUrl = `${basePath}/${encodeURIComponent(channel)}/composer`;
     const channelListLink = `<a href="${basePath}/" target="_top" class="channel-list-link" aria-label="チャンネル一覧へ戻る" title="チャンネル一覧へ戻る">☰</a>`;
     const flashHtml = renderFlashMessage(flashMessage, flashTone);
-    const onLoadScript = shouldReloadMessages
-      ? `var frame = window.parent && window.parent.document.getElementById("channel-messages-frame");
-if (frame && frame.contentWindow) {
-  frame.contentWindow.location.reload();
-}`
-      : "";
+    const onLoadScript = buildComposerOnLoadScript(shouldReloadMessages);
 
     return CHANNEL_COMPOSER_TEMPLATE
       .replace("{{CSS}}", buildChannelCss(webUiSettings))

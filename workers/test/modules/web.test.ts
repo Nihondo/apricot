@@ -149,7 +149,7 @@ describe("createWebModule", () => {
     expect(messagesFrameIndex).toBeLessThan(composerFrameIndex);
   });
 
-  it("buildChannelMessagesPage asc: messages stay chronological and auto-scrolls to bottom", async () => {
+  it("buildChannelMessagesPage asc: messages stay chronological and only auto-scroll near bottom", async () => {
     const web = createWebModule(new Map(), 0);
     const ctx = makeContext();
 
@@ -174,7 +174,9 @@ describe("createWebModule", () => {
     const secondIdx = html.indexOf("second");
     expect(firstIdx).toBeLessThan(secondIdx); // 古い順（firstが上）
     expect(html).not.toContain("再読込");
-    expect(html).toContain("scrollHeight");
+    expect(html).toContain("nearBottomThreshold = 48");
+    expect(html).toContain("sessionStorage.getItem");
+    expect(html).toContain("beforeunload");
   });
 
   it("buildChannelMessagesPage desc: messages are reversed and show the reload button", async () => {
@@ -202,10 +204,11 @@ describe("createWebModule", () => {
     const secondIdx = html.indexOf("second");
     expect(secondIdx).toBeLessThan(firstIdx); // 新しい順（secondが上）
     expect(html).toContain("再読込");
-    expect(html).not.toContain("scrollHeight");
+    expect(html).not.toContain("nearBottomThreshold = 48");
+    expect(html).not.toContain("sessionStorage.getItem");
   });
 
-  it("buildChannelComposerPage includes the list link and reloads messages after submit", () => {
+  it("buildChannelComposerPage includes the list link, reloads messages after submit, and blocks frame scrolling", () => {
     const web = createWebModule(new Map(), 0);
     const html = web.buildChannelComposerPage(
       "#general",
@@ -225,6 +228,9 @@ describe("createWebModule", () => {
     expect(html).toContain("送信失敗");
     expect(html).toContain("channel-messages-frame");
     expect(html).toContain("location.reload()");
+    expect(html).toContain('window.addEventListener("wheel"');
+    expect(html).toContain('window.addEventListener("touchmove"');
+    expect(html).toContain("event.preventDefault()");
   });
 
   it("trims restored logs to the latest 200 messages", () => {

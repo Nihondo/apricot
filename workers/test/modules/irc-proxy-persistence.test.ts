@@ -535,7 +535,8 @@ describe("IrcProxyDO web log persistence", () => {
     }));
     const messagesHtml = await messagesPage.text();
     expect(messagesHtml).toContain("hello");
-    expect(messagesHtml).toContain("scrollHeight");
+    expect(messagesHtml).toContain("nearBottomThreshold = 48");
+    expect(messagesHtml).toContain("sessionStorage.getItem");
     expect(messagesHtml).not.toContain("再読込");
     expect(messagesHtml).toContain("body { color: blue; }");
 
@@ -548,6 +549,8 @@ describe("IrcProxyDO web log persistence", () => {
     const composerHtml = await composerPage.text();
     expect(composerHtml).toContain('action="/proxy/main/web/%23general/composer"');
     expect(composerHtml).toContain('href="/proxy/main/web/"');
+    expect(composerHtml).toContain('window.addEventListener("wheel"');
+    expect(composerHtml).toContain('window.addEventListener("touchmove"');
     expect(composerHtml).toContain("body { color: blue; }");
 
     const loginPage = await proxy.fetch(new Request("https://example.com/web/login", {

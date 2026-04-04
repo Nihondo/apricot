@@ -90,12 +90,16 @@ hr { border: none; border-top: 1px solid var(--border-color); margin: 5px 0; }
 .channel-composer-page {
   height: 100%;
   padding: 0;
+  overflow: hidden;
+  overscroll-behavior: none;
   background-color: var(--rowcolor0);
 }
 .channel-composer-shell {
   display: flex;
   flex-direction: column;
   min-height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
   background-color: var(--rowcolor0);
 }
 a {
@@ -190,6 +194,7 @@ input:focus { outline: none; }
   align-items: stretch;
   width: 100%;
   min-height: 100%;
+  overflow: hidden;
 }
 .channel-list-link {
   display: inline-flex;
