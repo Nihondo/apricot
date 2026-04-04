@@ -238,10 +238,11 @@ function renderThemeColorFields(webUiSettings: WebUiSettings): string {
 }
 
 function renderThemePresetControls(): string {
-  return `<div class="admin-message admin-message--info" style="display:flex; align-items: center;"><strong>配色プリセット</strong></div>
+  return `<div class="admin-message admin-message--info" style="display:flex; align-items: center;"><strong>配色プリセット</strong>
 <div class="admin-form__actions" style="margin-left: auto;">
   <button type="button" class="admin-button admin-button--subtle" data-theme-preset="light">ライト</button>
   <button type="button" class="admin-button admin-button--subtle" data-theme-preset="dark">ダーク</button>
+</div>
 </div>`;
 }
 

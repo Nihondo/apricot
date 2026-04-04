@@ -35,7 +35,6 @@
     </div>
 
     <form action="{{ACTION_URL}}" method="POST" class="admin-form">
-      {{PRESET_CONTROLS}}
       <label class="admin-field">
         <span class="admin-field__label">フォントファミリー</span>
         <input type="text" name="fontFamily" value="{{FONT_FAMILY}}" class="admin-input" maxlength="200">
@@ -44,6 +43,7 @@
         <span class="admin-field__label">文字サイズ (px)</span>
         <input type="number" name="fontSizePx" value="{{FONT_SIZE_PX}}" min="10" max="32" class="admin-input">
       </label>
+      {{PRESET_CONTROLS}}
       <div class="admin-grid admin-grid--list">
         {{COLOR_FIELDS}}
       </div>
