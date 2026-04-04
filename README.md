@@ -108,7 +108,8 @@ http://localhost:8787/proxy/myproxy/web/
 チャンネル画面では:
 - メッセージの送受信
 - URL の自動リンク化
-- WebSocket 通知時のみ即時更新し、切断中だけ 30 秒間隔で Fetch 再読込
+- 更新があった時の自動反映
+- 接続が不安定な場合の自動再同期
 
 チャンネル一覧画面では:
 - チャンネルへの参加・離脱
@@ -378,6 +379,8 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 | `POST` | `/proxy/:id/web/nick` | Cookie | Web UI ニックネーム変更 |
 | `GET` | `/proxy/:id/web/:channel` | Cookie | チャンネルシェルページ |
 | `GET` | `/proxy/:id/web/:channel/messages` | Cookie | メッセージ一覧フレーム |
+| `GET` | `/proxy/:id/web/:channel/messages/fragment` | Cookie | メッセージ一覧の HTML 断片（Web UI 内部更新用） |
+| `GET` | `/proxy/:id/web/:channel/updates` | Cookie | メッセージ更新通知用 WebSocket（Web UI 内部用） |
 | `GET` | `/proxy/:id/web/:channel/composer` | Cookie | 入力フォームフレーム |
 | `POST` | `/proxy/:id/web/:channel/composer` | Cookie | Web フォームからメッセージ送信 |
 | `POST` | `/proxy/:id/api/connect` | Bearer | IRC サーバーへ接続 |
@@ -401,7 +404,19 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 | `/proxy/:id/web/settings` | 表示設定 |
 | `/proxy/:id/web/:channel` | チャンネルシェル画面（iframe 構成） |
 | `/proxy/:id/web/:channel/messages` | メッセージ一覧フレーム |
+| `/proxy/:id/web/:channel/messages/fragment` | メッセージ一覧の HTML 断片。iframe 内の Fetch 更新で使用 |
+| `/proxy/:id/web/:channel/updates` | メッセージ更新通知を受ける WebSocket |
 | `/proxy/:id/web/:channel/composer` | 入力フォームフレーム |
+
+### Web UI の更新内部ルート
+
+チャンネル画面のメッセージ領域は、以下の Web UI 内部ルートを使って更新されます。
+これらはブラウザ表示用の内部エンドポイントで、外部連携向け API ではありません。
+
+- `GET /proxy/:id/web/:channel/messages/fragment` — メッセージ一覧部分だけを返す HTML 断片
+- `GET /proxy/:id/web/:channel/updates` — メッセージ更新通知を受ける WebSocket
+
+通常は `updates` の通知を受けた時だけ `messages/fragment` を Fetch し、通知用 WebSocket が切断中のときだけ 30 秒間隔で再同期します。
 
 ---
 

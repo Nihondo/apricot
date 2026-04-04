@@ -197,6 +197,8 @@ describe("createWebModule", () => {
     expect(html).toContain("/messages/fragment");
     expect(html).toContain("/updates");
     expect(html).toContain("setInterval(function ()");
+    expect(html).toContain("var apricotNormalizedUpdateChannel = apricotUpdateChannel.toLowerCase()");
+    expect(html).toContain('var payloadChannel = typeof payload.channel === "string" ? payload.channel.toLowerCase() : ""');
   });
 
   it("buildChannelMessagesPage desc: messages are reversed and show the reload button", async () => {

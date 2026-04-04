@@ -643,6 +643,7 @@ function buildMessagesPageScript(
   const shouldAutoStick = webUiSettings.displayOrder === "asc";
   return `window.apricotMessagesRuntime = window.apricotMessagesRuntime || {};
 var apricotUpdateChannel = ${serializedChannel};
+var apricotNormalizedUpdateChannel = apricotUpdateChannel.toLowerCase();
 var apricotShouldAutoStick = ${shouldAutoStick ? "true" : "false"};
 var apricotRefreshInFlight = false;
 var apricotRefreshQueued = false;
@@ -730,7 +731,8 @@ async function refreshMessages() {
 function handleUpdateMessage(event) {
   try {
     var payload = JSON.parse(event.data);
-    if (payload.type !== "channel-updated" || payload.channel !== apricotUpdateChannel) {
+    var payloadChannel = typeof payload.channel === "string" ? payload.channel.toLowerCase() : "";
+    if (payload.type !== "channel-updated" || payloadChannel !== apricotNormalizedUpdateChannel) {
       return;
     }
     var revision = Number(payload.revision || "0");
