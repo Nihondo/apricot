@@ -130,13 +130,18 @@ export function buildChannelListPage(
   serverName: string,
   connected: boolean,
   basePath: string,
-  showLogout = false
+  showLogout = false,
+  displayOrder: "asc" | "desc" = "desc"
 ): string {
   const chLinks = channels.length === 0
     ? "<p>No channels joined.</p>"
     : channels
         .map((ch) => `<a href="${basePath}/${encodeURIComponent(ch)}">${escapeHtml(ch)}</a>`)
         .join("\n");
+
+  const ascActive = displayOrder === "asc" ? "active" : "";
+  const descActive = displayOrder === "desc" ? "active" : "";
+  const toggleHtml = `<div class="display-order-toggle">表示順: <form action="${basePath}/display-order" method="POST" style="display:inline;"><input type="hidden" name="order" value="asc"><button type="submit" class="toggle-button ${ascActive}">古い順</button></form> <form action="${basePath}/display-order" method="POST" style="display:inline;"><input type="hidden" name="order" value="desc"><button type="submit" class="toggle-button ${descActive}">新しい順</button></form></div>`;
 
   return CHANNEL_LIST_TEMPLATE
     .replace("{{CSS}}", CSS)
@@ -149,6 +154,7 @@ export function buildChannelListPage(
         ? `<div class="web-auth-bar"><form action="${basePath}/logout" method="POST"><input type="submit" value="Logout" class="logout-button"></form></div>`
         : ""
     )
+    .replace("{{DISPLAY_ORDER_TOGGLE}}", toggleHtml)
     .replace("{{CHANNEL_LINKS}}", chLinks);
 }
 
@@ -309,11 +315,12 @@ export function createWebModule(
     topic: string,
     selfNick: string,
     basePath: string,
-    showLogout = false
+    showLogout = false,
+    displayOrder: "asc" | "desc" = "desc"
   ): string {
     const buf = getBuffer(channel);
-    const reversed = [...buf].reverse();
-    const lines = reversed
+    const ordered = displayOrder === "asc" ? [...buf] : [...buf].reverse();
+    const lines = ordered
       .map((msg, i) => {
         const cls = i % 2 === 0 ? "color0" : "color1";
         return `<div class="${cls}">${renderMessage(msg, selfNick, timezoneOffset)}</div>`;
@@ -321,6 +328,11 @@ export function createWebModule(
       .join("\n");
 
     const actionUrl = `${basePath}/${encodeURIComponent(channel)}`;
+    const inputBarPosition = displayOrder === "asc" ? "bottom" : "top";
+    const reloadButton = displayOrder === "desc"
+      ? '<button type="button" class="floating" onclick="location.reload();">Reload</button>'
+      : "";
+    const contentPadding = displayOrder === "asc" ? "padding-bottom:45px;" : "padding-top:45px;";
 
     return CHANNEL_TEMPLATE
       .replace("{{CSS}}", CSS)
@@ -333,6 +345,9 @@ export function createWebModule(
       .replace("{{CHANNEL}}", escapeHtml(channel))
       .replace("{{TOPIC}}", escapeHtml(topic))
       .replace("{{ACTION_URL}}", actionUrl)
+      .replace("{{INPUT_BAR_POSITION}}", inputBarPosition)
+      .replace("{{RELOAD_BUTTON}}", reloadButton)
+      .replace("{{CONTENT_PADDING}}", contentPadding)
       .replace("{{MESSAGES}}", lines);
   }
 

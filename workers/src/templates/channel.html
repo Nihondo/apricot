@@ -2,7 +2,7 @@
 <html><head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, user-scalable=no">
-<title>IRC: {{CHANNEL}}</title>
+<title>IRC: {{CHANNEL}}/Topic: {{TOPIC}}</title>
 <style>{{CSS}}</style>
 <script>
 window.onload = function() {
@@ -22,16 +22,16 @@ window.addEventListener('load', function () {
 </script>
 </head>
 <body>
-<div style="margin:5px;">
-  {{LOGOUT_FORM}}
-  <div class="topic">Topic: {{TOPIC}}</div>
-  <form action="{{ACTION_URL}}" method="POST">
-    <input type="text" name="message" size="10" class="message-input" autocomplete="off"><input type="submit" value="OK" class="submit-button" onclick="sessionStorage.setItem('justPosted','true');">
-    <div style="position:fixed; bottom:10px; left:50%;">
-      <button type="button" class="floating" onclick="location.reload();">Reload</button>
-    </div>
-  </form>
-  <hr>
-  {{MESSAGES}}
+<div style="margin:5px;{{CONTENT_PADDING}}">
+  <div class="input-bar {{INPUT_BAR_POSITION}}">
+    <form action="{{ACTION_URL}}" method="POST">
+      <input type="text" name="message" size="10" class="message-input" autocomplete="off"><input type="submit" value="OK" class="submit-button" onclick="sessionStorage.setItem('justPosted','true');">
+      {{RELOAD_BUTTON}}
+      </div>
+    </form>
+  </div>
+
+{{MESSAGES}}
 </div>
+
 </body></html>

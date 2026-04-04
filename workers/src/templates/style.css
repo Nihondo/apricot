@@ -63,6 +63,12 @@ a {
 }
 a:hover { text-decoration: underline; }
 .topic { font-weight: bold; margin-bottom: 5px; }
+.input-bar {
+  position: fixed; left: 0; z-index: 2;
+  width: 100%;
+}
+.top { top: 0; }
+.bottom { bottom: 0; }
 .message-input {
   -webkit-appearance: none; appearance: none;
   margin: 0; width: 85%; height: 40px;
@@ -86,10 +92,10 @@ a:hover { text-decoration: underline; }
 }
 .floating {
   -webkit-appearance: none; appearance: none;
-  position: relative; left: -50%;
+  position: fixed; bottom: 10px; left: 50%; z-index: 1;
   height: 60px; width: 60px;
   font-size: 0.7em; opacity: 0.5;
-  z-index: 1; border-radius: 50%; border: none;
+  border-radius: 50%; border: none;
   color: var(--button-fg);
   background-color: var(--button-bg);
   cursor: pointer;
@@ -114,6 +120,25 @@ a:hover { text-decoration: underline; }
   color: var(--textcolor);
   padding: 4px 10px;
   cursor: pointer;
+}
+.display-order-toggle {
+  padding: 6px 8px;
+  font-size: 0.85em;
+  color: var(--text-contrast-low);
+}
+.toggle-button {
+  -webkit-appearance: none; appearance: none;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--textcolor);
+  padding: 4px 10px;
+  cursor: pointer;
+  font-size: 0.85em;
+}
+.toggle-button.active {
+  background-color: var(--button-bg);
+  color: var(--button-fg);
+  font-weight: bold;
 }
 .login-shell {
   min-height: 100vh;

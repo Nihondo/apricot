@@ -3,9 +3,9 @@ import type { ModuleContext } from "../module-system";
 
 vi.mock("../templates/style.css", () => ({ default: "" }));
 vi.mock("../templates/channel.html", () => ({
-  default: "<html><body><h1>{{CHANNEL}}</h1><div>{{TOPIC}}</div><form action=\"{{ACTION_URL}}\"></form>{{MESSAGES}}</body></html>",
+  default: "<html><body>{{INPUT_BAR_POSITION}}{{RELOAD_BUTTON}}{{CONTENT_PADDING}}<h1>{{CHANNEL}}</h1><div>{{TOPIC}}</div><form action=\"{{ACTION_URL}}\"></form>{{MESSAGES}}</body></html>",
 }));
-vi.mock("../templates/channel-list.html", () => ({ default: "{{CHANNEL_LINKS}}" }));
+vi.mock("../templates/channel-list.html", () => ({ default: "{{DISPLAY_ORDER_TOGGLE}}{{CHANNEL_LINKS}}" }));
 
 import { createWebModule, type PersistedWebLogs } from "./web";
 
@@ -82,6 +82,54 @@ describe("createWebModule", () => {
     expect(html).toContain("welcome topic");
     expect(html).toContain("hello world");
     expect(html).toContain("alice&gt;");
+  });
+
+  it("buildChannelPage desc: messages reversed, input-bar top, reload button present", async () => {
+    const web = createWebModule(new Map(), 0);
+    const ctx = makeContext();
+
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "first"],
+    });
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "second"],
+    });
+
+    const html = web.buildChannelPage("#general", "", "apricot", "/proxy/main/web", false, "desc");
+    const firstIdx = html.indexOf("first");
+    const secondIdx = html.indexOf("second");
+    expect(secondIdx).toBeLessThan(firstIdx); // 新しい順（secondが上）
+    expect(html).toContain("top");
+    expect(html).toContain("Reload");
+    expect(html).toContain("padding-top:45px;");
+  });
+
+  it("buildChannelPage asc: messages chronological, input-bar bottom, no reload button", async () => {
+    const web = createWebModule(new Map(), 0);
+    const ctx = makeContext();
+
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "first"],
+    });
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "second"],
+    });
+
+    const html = web.buildChannelPage("#general", "", "apricot", "/proxy/main/web", false, "asc");
+    const firstIdx = html.indexOf("first");
+    const secondIdx = html.indexOf("second");
+    expect(firstIdx).toBeLessThan(secondIdx); // 古い順（firstが上）
+    expect(html).toContain("bottom");
+    expect(html).not.toContain("Reload");
+    expect(html).toContain("padding-bottom:45px;");
   });
 
   it("trims restored logs to the latest 200 messages", () => {

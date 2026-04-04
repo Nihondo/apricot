@@ -19,6 +19,7 @@ import LOGIN_TEMPLATE from "./templates/login.html";
 const reconnectDelayMs = 5_000;
 const webLogsStorageKey = "web:logs:v1";
 const webAuthCookieName = "apricot_web_auth";
+const displayOrderCookieName = "apricot_display_order";
 const nickErrorCodes = new Set(["431", "432", "433", "436", "437", "438", "447", "484", "485"]);
 
 export class IrcProxyDO implements DurableObject {
@@ -218,15 +219,39 @@ export class IrcProxyDO implements DurableObject {
       return new Response("Method Not Allowed", { status: 405 });
     }
 
+    // POST /web/display-order — set display order preference cookie
+    if (request.method === "POST" && (url.pathname === "/web/display-order" || url.pathname === "/web/display-order/")) {
+      const formData = await request.formData();
+      const order = formData.get("order") as string | null;
+      const value = order === "asc" ? "asc" : "desc";
+      const isSecure = new URL(request.url).protocol === "https:";
+      const cookieStr = [
+        `${displayOrderCookieName}=${value}`,
+        `Path=${proxyPrefix}/web`,
+        "SameSite=Strict",
+        "Max-Age=31536000",
+        ...(isSecure ? ["Secure"] : []),
+      ].join("; ");
+      return new Response(null, {
+        status: 302,
+        headers: {
+          Location: `${webBase}/`,
+          "Set-Cookie": cookieStr,
+        },
+      });
+    }
+
     // GET /web — channel list
     if (url.pathname === "/web" || url.pathname === "/web/") {
+      const displayOrder = this.getDisplayOrder(request);
       const html = buildChannelListPage(
         this.channels,
         this.nick,
         this.serverName,
         this.serverConn?.connected ?? false,
         webBase,
-        Boolean(this.config?.password)
+        Boolean(this.config?.password),
+        displayOrder
       );
       return new Response(html, {
         headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -277,7 +302,8 @@ export class IrcProxyDO implements DurableObject {
         topic,
         this.nick,
         webBase,
-        Boolean(this.config?.password)
+        Boolean(this.config?.password),
+        this.getDisplayOrder(request)
       );
       return new Response(html, {
         headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -924,6 +950,11 @@ export class IrcProxyDO implements DurableObject {
 
     const expected = await this.buildWebAuthCookieValue(proxyPrefix);
     return actual === expected;
+  }
+
+  private getDisplayOrder(request: Request): "asc" | "desc" {
+    const cookies = this.parseCookies(request.headers.get("Cookie"));
+    return cookies.get(displayOrderCookieName) === "asc" ? "asc" : "desc";
   }
 
   private parseCookies(cookieHeader: string | null): Map<string, string> {
