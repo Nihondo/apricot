@@ -4,10 +4,10 @@ import type { ModuleContext } from "../module-system";
 vi.mock("../templates/admin-style.css", () => ({ default: "ADMIN_CSS" }));
 vi.mock("../templates/style.css", () => ({ default: "" }));
 vi.mock("../templates/channel.html", () => ({
-  default: "<html><head><style>{{CSS}}</style></head><body>{{LOGOUT_FORM}}<div class=\"shell\">{{FRAME_CONTENT}}</div></body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body><div class=\"shell\">{{FRAME_CONTENT}}</div></body></html>",
 }));
 vi.mock("../templates/channel-messages.html", () => ({
-  default: "<html><head><style>{{CSS}}</style><script>{{AUTO_SCROLL_SCRIPT}}</script></head><body>{{TOPIC_BLOCK}}{{MESSAGES}}{{RELOAD_BUTTON}}</body></html>",
+  default: "<html><head><style>{{CSS}}</style><script>{{AUTO_SCROLL_SCRIPT}}</script></head><body>{{MESSAGES}}{{RELOAD_BUTTON}}</body></html>",
 }));
 vi.mock("../templates/channel-composer.html", () => ({
   default: "<html><head><style>{{CSS}}</style><script>{{ON_LOAD_SCRIPT}}</script></head><body>{{FLASH_MESSAGE}}<form action=\"{{ACTION_URL}}\">{{CHANNEL_LIST_LINK}}<input name=\"message\" value=\"{{MESSAGE_VALUE}}\"><button>送信</button></form></body></html>",
@@ -207,7 +207,7 @@ describe("createWebModule", () => {
 
     expect(html).toContain('action="/proxy/main/web/%23general/composer"');
     expect(html).toContain('href="/proxy/main/web/"');
-    expect(html).toContain("一覧");
+    expect(html).toContain("☰");
     expect(html).toContain('value="draft"');
     expect(html).toContain("送信失敗");
     expect(html).toContain("channel-messages-frame");

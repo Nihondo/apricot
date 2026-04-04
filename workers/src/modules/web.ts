@@ -158,10 +158,6 @@ function renderFlashMessage(message: string, tone: "info" | "danger"): string {
     : "";
 }
 
-function renderLogoutForm(basePath: string): string {
-  return `<form action="${basePath}/logout" method="POST"><input type="submit" value="ログアウト" class="logout-button"></form>`;
-}
-
 function renderAdminLogoutForm(basePath: string): string {
   return `<form action="${basePath}/logout" method="POST"><button type="submit" class="admin-button admin-button--subtle">ログアウト</button></form>`;
 }
@@ -611,12 +607,6 @@ export function createWebModule(
       .replace("{{CSS}}", buildChannelCss(webUiSettings))
       .replace("{{CHANNEL}}", escapeHtml(channel))
       .replace("{{TOPIC}}", escapeHtml(topic))
-      .replace(
-        "{{LOGOUT_FORM}}",
-        showLogout
-          ? `<div class="web-auth-bar">${renderLogoutForm(basePath)}</div>`
-          : ""
-      )
       .replace("{{FRAME_CONTENT}}", frameContent);
   }
 
@@ -629,16 +619,10 @@ export function createWebModule(
     const buf = getBuffer(channel);
     const ordered = webUiSettings.displayOrder === "asc" ? [...buf] : [...buf].reverse();
     const lines = ordered
-      .map((msg, i) => {
-        const cls = i % 2 === 0 ? "color0" : "color1";
-        return `<div class="${cls}">${renderMessage(msg, selfNick, timezoneOffset)}</div>`;
-      })
+      .map((msg) => `<div>${renderMessage(msg, selfNick, timezoneOffset)}</div>`)
       .join("\n");
     const reloadButton = webUiSettings.displayOrder === "desc"
       ? '<button type="button" class="floating" onclick="location.reload();">再読込</button>'
-      : "";
-    const topicBlock = topic
-      ? `<div class="topic">${escapeHtml(topic)}</div>`
       : "";
     const autoScrollScript = webUiSettings.displayOrder === "asc"
       ? "var root = document.scrollingElement || document.documentElement; window.scrollTo(0, root.scrollHeight);"
@@ -648,7 +632,6 @@ export function createWebModule(
       .replace("{{CSS}}", buildChannelCss(webUiSettings))
       .replace("{{CHANNEL}}", escapeHtml(channel))
       .replace("{{TOPIC}}", escapeHtml(topic))
-      .replace("{{TOPIC_BLOCK}}", topicBlock)
       .replace("{{RELOAD_BUTTON}}", reloadButton)
       .replace("{{AUTO_SCROLL_SCRIPT}}", autoScrollScript)
       .replace("{{MESSAGES}}", lines);
@@ -664,7 +647,7 @@ export function createWebModule(
     shouldReloadMessages = false
   ): string {
     const actionUrl = `${basePath}/${encodeURIComponent(channel)}/composer`;
-    const channelListLink = `<a href="${basePath}/" class="channel-list-link" aria-label="チャンネル一覧へ戻る" title="チャンネル一覧へ戻る">一覧</a>`;
+    const channelListLink = `<a href="${basePath}/" class="channel-list-link" aria-label="チャンネル一覧へ戻る" title="チャンネル一覧へ戻る">☰</a>`;
     const flashHtml = renderFlashMessage(flashMessage, flashTone);
     const onLoadScript = shouldReloadMessages
       ? `var frame = window.parent && window.parent.document.getElementById("channel-messages-frame");

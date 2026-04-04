@@ -43,11 +43,11 @@ body {
   padding: 0;
 }
 div { word-wrap: break-word; }
-div.color0:has(a) { color: var(--accent-highlight); }
-div.color1:has(a) { color: var(--accent-highlight); }
+.channel-messages-shell > div { padding: 0px 3px; }
+.channel-messages-shell > div:nth-child(odd) { background-color: var(--rowcolor0); }
+.channel-messages-shell > div:nth-child(even) { background-color: var(--rowcolor1); }
+.channel-messages-shell > div:has(a) { color: var(--accent-highlight); }
 hr { border: none; border-top: 1px solid var(--border-color); margin: 5px 0; }
-.color0 { background-color: var(--rowcolor0); padding: 0px 3px; }
-.color1 { background-color: var(--rowcolor1); padding: 0px 3px; }
 .timestamp { color: var(--accent-timestamp); }
 .username-self { color: var(--accent-self); font-weight: bold; }
 .username-other { color: var(--accent-username); font-weight: bold; }
