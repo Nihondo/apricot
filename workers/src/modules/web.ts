@@ -14,8 +14,10 @@
 import { defineModule } from "../module-system";
 import { extractNick, isChannel } from "../irc-parser";
 import CSS from "../templates/style.css";
+import ADMIN_CSS from "../templates/admin-style.css";
 import CHANNEL_TEMPLATE from "../templates/channel.html";
 import CHANNEL_LIST_TEMPLATE from "../templates/channel-list.html";
+import SETTINGS_TEMPLATE from "../templates/settings.html";
 
 // ---------------------------------------------------------------------------
 // Message storage
@@ -32,8 +34,31 @@ export interface StoredMessage {
  * JSON-serializable snapshot of per-channel web logs keyed by lowercase channel.
  */
 export type PersistedWebLogs = Record<string, StoredMessage[]>;
+export type WebDisplayOrder = "asc" | "desc";
+
+export interface WebUiSettings {
+  fontFamily: string;
+  fontSizePx: number;
+  textColor: string;
+  surfaceColor: string;
+  surfaceAltColor: string;
+  accentColor: string;
+  displayOrder: WebDisplayOrder;
+  extraCss: string;
+}
 
 const DEFAULT_maxLines = 200;
+
+export const DEFAULT_WEB_UI_SETTINGS: WebUiSettings = {
+  fontFamily: "\"Hiragino Kaku Gothic ProN\", \"Noto Sans JP\", sans-serif",
+  fontSizePx: 16,
+  textColor: "#000000",
+  surfaceColor: "#FFFFFF",
+  surfaceAltColor: "#EDF3FE",
+  accentColor: "#0B5FFF",
+  displayOrder: "desc",
+  extraCss: "",
+};
 
 type MessageBufferStore = Map<string, StoredMessage[]>;
 type PersistLogsCallback = (logs: PersistedWebLogs) => Promise<void>;
@@ -54,6 +79,90 @@ function escapeHtml(s: string): string {
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
+}
+
+function renderColorValue(color: string): string {
+  return color.toUpperCase();
+}
+
+function renderSettingsError(errorMessage: string): string {
+  return errorMessage
+    ? `<div class="admin-message admin-message--danger" role="alert"><strong>設定を保存できませんでした。</strong><span>${escapeHtml(errorMessage)}</span></div>`
+    : "";
+}
+
+function renderLogoutForm(basePath: string): string {
+  return `<form action="${basePath}/logout" method="POST"><input type="submit" value="Logout" class="logout-button"></form>`;
+}
+
+function renderAdminLogoutForm(basePath: string): string {
+  return `<form action="${basePath}/logout" method="POST"><button type="submit" class="admin-button admin-button--subtle">Logout</button></form>`;
+}
+
+/**
+ * Returns a cloned settings object with missing fields filled from defaults.
+ */
+export function buildWebUiSettings(
+  overrides?: Partial<WebUiSettings> | null
+): WebUiSettings {
+  return {
+    ...DEFAULT_WEB_UI_SETTINGS,
+    ...overrides,
+  };
+}
+
+/**
+ * Returns true when the provided value is a valid message display order.
+ */
+export function isWebDisplayOrder(value: string): value is WebDisplayOrder {
+  return value === "asc" || value === "desc";
+}
+
+/**
+ * Builds the fixed admin UI CSS injected into non-channel Web UI pages.
+ */
+export function buildAdminCss(): string {
+  return ADMIN_CSS;
+}
+
+/**
+ * Builds the CSS string injected into the channel page.
+ */
+export function buildChannelCss(settings: WebUiSettings): string {
+  const rootLines: string[] = [];
+  if (settings.surfaceColor !== DEFAULT_WEB_UI_SETTINGS.surfaceColor) {
+    rootLines.push(`--rowcolor0: ${settings.surfaceColor};`);
+  }
+  if (settings.surfaceAltColor !== DEFAULT_WEB_UI_SETTINGS.surfaceAltColor) {
+    rootLines.push(`--rowcolor1: ${settings.surfaceAltColor};`);
+  }
+  if (settings.textColor !== DEFAULT_WEB_UI_SETTINGS.textColor) {
+    rootLines.push(`--textcolor: ${settings.textColor};`);
+  }
+  if (settings.accentColor !== DEFAULT_WEB_UI_SETTINGS.accentColor) {
+    rootLines.push(`--accent-link: ${settings.accentColor};`);
+    rootLines.push(`--border-color: ${settings.accentColor};`);
+    rootLines.push(`--button-bg: ${settings.accentColor};`);
+  }
+
+  const typographyLines: string[] = [];
+  if (settings.fontFamily !== DEFAULT_WEB_UI_SETTINGS.fontFamily) {
+    typographyLines.push(`font-family: ${settings.fontFamily};`);
+  }
+  if (settings.fontSizePx !== DEFAULT_WEB_UI_SETTINGS.fontSizePx) {
+    typographyLines.push(`font-size: ${settings.fontSizePx}px;`);
+  }
+
+  const blocks: string[] = [];
+  if (rootLines.length > 0) {
+    blocks.push(`:root {\n  ${rootLines.join("\n  ")}\n}`);
+  }
+  if (typographyLines.length > 0) {
+    blocks.push(`body,\ninput,\nbutton,\ntextarea {\n  ${typographyLines.join("\n  ")}\n}`);
+  }
+
+  const extraCss = settings.extraCss.trim();
+  return [CSS, ...blocks, extraCss].filter(Boolean).join("\n\n");
 }
 
 /**
@@ -131,32 +240,83 @@ export function buildChannelListPage(
   connected: boolean,
   basePath: string,
   showLogout = false,
-  displayOrder: "asc" | "desc" = "desc"
+  showSettings = false,
 ): string {
-  const joinForm = `<form action="${basePath}/join" method="POST" class="join-form"><input type="text" name="channel" placeholder="#channel" class="join-input" autocomplete="off"><button type="submit" class="join-button">Join</button></form>`;
+  const joinForm = `
+<form action="${basePath}/join" method="POST" class="admin-inline-form">
+  <input type="text" name="channel" placeholder="#channel" class="admin-input" autocomplete="off">
+  <button type="submit" class="admin-button admin-button--primary">Join channel</button>
+</form>`;
   const chLinks = (channels.length === 0
-    ? "<p>No channels joined.</p>"
+    ? `<div class="admin-empty-state"><h3>No channels joined</h3><p>JOIN 済みチャンネルはここに表示されます。下のフォームから参加できます。</p></div>`
     : channels
-        .map((ch) => `<div class="channel-item"><a href="${basePath}/${encodeURIComponent(ch)}">${escapeHtml(ch)}</a><form action="${basePath}/leave" method="POST" style="display:inline;"><input type="hidden" name="channel" value="${escapeHtml(ch)}"><button type="submit" class="leave-button">×</button></form></div>`)
+        .map((ch) => `
+<div class="admin-list-item">
+  <a href="${basePath}/${encodeURIComponent(ch)}" class="admin-list-item__link">
+    <span class="admin-list-item__title">${escapeHtml(ch)}</span>
+    <span class="admin-list-item__meta">Open channel view</span>
+  </a>
+  <form action="${basePath}/leave" method="POST">
+    <input type="hidden" name="channel" value="${escapeHtml(ch)}">
+    <button type="submit" class="admin-button admin-button--danger">Leave</button>
+  </form>
+</div>`)
         .join("\n")) + `\n${joinForm}`;
-
-  const ascActive = displayOrder === "asc" ? "active" : "";
-  const descActive = displayOrder === "desc" ? "active" : "";
-  const toggleHtml = `<div class="display-order-toggle">表示順: <form action="${basePath}/display-order" method="POST" style="display:inline;"><input type="hidden" name="order" value="asc"><button type="submit" class="toggle-button ${ascActive}">古い順</button></form> <form action="${basePath}/display-order" method="POST" style="display:inline;"><input type="hidden" name="order" value="desc"><button type="submit" class="toggle-button ${descActive}">新しい順</button></form></div>`;
+  const actionParts: string[] = [];
+  if (showSettings) {
+    actionParts.push(`<a href="${basePath}/settings" class="admin-button admin-button--subtle">Settings</a>`);
+  }
+  if (showLogout) {
+    actionParts.push(renderAdminLogoutForm(basePath));
+  }
+  const statusClass = connected ? "admin-status-badge--success" : "admin-status-badge--danger";
+  const statusText = connected ? "Connected" : "Disconnected";
+  const channelCountText = channels.length === 0
+    ? "参加中チャンネルはありません"
+    : `${channels.length} channel${channels.length === 1 ? "" : "s"} joined`;
 
   return CHANNEL_LIST_TEMPLATE
-    .replace("{{CSS}}", CSS)
+    .replace("{{CSS}}", buildAdminCss())
+    .replace("{{STATUS_CLASS}}", statusClass)
+    .replace("{{STATUS_TEXT}}", statusText)
     .replace("{{STATUS_ICON}}", connected ? "&#x1f7e2;" : "&#x1f534;")
     .replace("{{NICK}}", escapeHtml(nick))
     .replace("{{SERVER_NAME}}", escapeHtml(serverName))
-    .replace(
-      "{{LOGOUT_FORM}}",
-      showLogout
-        ? `<div class="web-auth-bar"><form action="${basePath}/logout" method="POST"><input type="submit" value="Logout" class="logout-button"></form></div>`
-        : ""
-    )
-    .replace("{{DISPLAY_ORDER_TOGGLE}}", toggleHtml)
+    .replace("{{CHANNEL_COUNT}}", escapeHtml(channelCountText))
+    .replace("{{TOP_ACTIONS}}", actionParts.join(""))
     .replace("{{CHANNEL_LINKS}}", chLinks);
+}
+
+/**
+ * Builds the settings page HTML for the Web UI.
+ */
+export function buildSettingsPage(
+  nick: string,
+  serverName: string,
+  basePath: string,
+  webUiSettings: WebUiSettings,
+  errorMessage = ""
+): string {
+  const isAscendingOrder = webUiSettings.displayOrder === "asc";
+  const topActionsHtml = `<a href="${basePath}/" class="admin-button admin-button--subtle">Back to channels</a>${renderAdminLogoutForm(basePath)}`;
+  const errorHtml = renderSettingsError(errorMessage);
+
+  return SETTINGS_TEMPLATE
+    .replace("{{CSS}}", buildAdminCss())
+    .replace("{{NICK}}", escapeHtml(nick))
+    .replace("{{SERVER_NAME}}", escapeHtml(serverName))
+    .replace("{{TOP_ACTIONS}}", topActionsHtml)
+    .replace("{{ERROR}}", errorHtml)
+    .replace("{{ACTION_URL}}", `${basePath}/settings`)
+    .replace("{{FONT_FAMILY}}", escapeHtml(webUiSettings.fontFamily))
+    .replace("{{FONT_SIZE_PX}}", String(webUiSettings.fontSizePx))
+    .replace("{{TEXT_COLOR}}", renderColorValue(webUiSettings.textColor))
+    .replace("{{SURFACE_COLOR}}", renderColorValue(webUiSettings.surfaceColor))
+    .replace("{{SURFACE_ALT_COLOR}}", renderColorValue(webUiSettings.surfaceAltColor))
+    .replace("{{ACCENT_COLOR}}", renderColorValue(webUiSettings.accentColor))
+    .replace("{{DISPLAY_ORDER_ASC_CHECKED}}", isAscendingOrder ? "checked" : "")
+    .replace("{{DISPLAY_ORDER_DESC_CHECKED}}", isAscendingOrder ? "" : "checked")
+    .replace("{{EXTRA_CSS}}", escapeHtml(webUiSettings.extraCss));
 }
 
 // ---------------------------------------------------------------------------
@@ -317,10 +477,10 @@ export function createWebModule(
     selfNick: string,
     basePath: string,
     showLogout = false,
-    displayOrder: "asc" | "desc" = "desc"
+    webUiSettings: WebUiSettings = DEFAULT_WEB_UI_SETTINGS
   ): string {
     const buf = getBuffer(channel);
-    const ordered = displayOrder === "asc" ? [...buf] : [...buf].reverse();
+    const ordered = webUiSettings.displayOrder === "asc" ? [...buf] : [...buf].reverse();
     const lines = ordered
       .map((msg, i) => {
         const cls = i % 2 === 0 ? "color0" : "color1";
@@ -329,18 +489,18 @@ export function createWebModule(
       .join("\n");
 
     const actionUrl = `${basePath}/${encodeURIComponent(channel)}`;
-    const inputBarPosition = displayOrder === "asc" ? "bottom" : "top";
-    const reloadButton = displayOrder === "desc"
+    const inputBarPosition = webUiSettings.displayOrder === "asc" ? "bottom" : "top";
+    const reloadButton = webUiSettings.displayOrder === "desc"
       ? '<button type="button" class="floating" onclick="location.reload();">Reload</button>'
       : "";
-    const contentPadding = displayOrder === "asc" ? "padding-bottom:45px;" : "padding-top:45px;";
+    const contentPadding = webUiSettings.displayOrder === "asc" ? "padding-bottom:45px;" : "padding-top:45px;";
 
     return CHANNEL_TEMPLATE
-      .replace("{{CSS}}", CSS)
+      .replace("{{CSS}}", buildChannelCss(webUiSettings))
       .replace(
         "{{LOGOUT_FORM}}",
         showLogout
-          ? `<div class="web-auth-bar"><form action="${basePath}/logout" method="POST"><input type="submit" value="Logout" class="logout-button"></form></div>`
+          ? `<div class="web-auth-bar">${renderLogoutForm(basePath)}</div>`
           : ""
       )
       .replace("{{CHANNEL}}", escapeHtml(channel))

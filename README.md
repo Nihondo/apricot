@@ -100,6 +100,7 @@ http://localhost:8787/proxy/myproxy/web/
 | URL | 説明 |
 |-----|------|
 | `/proxy/:id/web/` | 参加中チャンネル一覧 |
+| `/proxy/:id/web/settings` | Web UI の表示設定 |
 | `/proxy/:id/web/:channel` | チャンネルのメッセージ表示・送信フォーム |
 
 **主な機能**:
@@ -110,11 +111,17 @@ http://localhost:8787/proxy/myproxy/web/
 - ダーク／ライトモード自動切替（`prefers-color-scheme` 対応）
 - URL は自動リンク化
 - `TIMEZONE_OFFSET` で時刻表示のタイムゾーンを設定可能（デフォルト UTC）
+- チャンネル一覧、設定画面、ログイン画面は固定のモダンUIで表示
+- 設定画面からチャンネル画面専用のフォント、文字サイズ、主要色、追加 CSS を変更可能
+- メッセージの表示順（古い順 / 新しい順）は設定画面で proxy ごとに保存し、チャンネル画面に反映
 
 **パスワードを設定する場合**:
 
 `CLIENT_PASSWORD` を設定すると Web UI もログイン必須になります。未設定時は公開状態になります。
 ログインは `/proxy/:id/web/login` から行い、認証は proxy ID ごとの HttpOnly Cookie で保持されます。
+設定画面は認証済み Web UI からのみ利用でき、設定内容は proxy ID ごとに Durable Object storage に保存されます。
+`Settings` 導線はチャンネル一覧画面にのみ表示され、チャンネル画面とログイン画面には表示されません。
+保存した表示カスタマイズはチャンネル画面のみに適用され、チャンネル一覧・設定画面・ログイン画面の見た目は固定です。
 
 ---
 

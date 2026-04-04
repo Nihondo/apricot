@@ -3,10 +3,12 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("cloudflare:sockets", () => ({
   connect: vi.fn(),
 }));
+vi.mock("./templates/admin-style.css", () => ({ default: "" }));
 vi.mock("./templates/style.css", () => ({ default: "" }));
 vi.mock("./templates/channel.html", () => ({ default: "" }));
 vi.mock("./templates/channel-list.html", () => ({ default: "" }));
 vi.mock("./templates/login.html", () => ({ default: "" }));
+vi.mock("./templates/settings.html", () => ({ default: "" }));
 
 import worker from "./index";
 

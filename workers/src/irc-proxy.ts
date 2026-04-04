@@ -10,16 +10,25 @@ import { ModuleRegistry } from "./module-system";
 import { pingModule } from "./modules/ping";
 import { createChannelTrackModule, type ChannelState } from "./modules/channel-track";
 import { createClientSyncModule } from "./modules/client-sync";
-import { createWebModule, buildChannelListPage, type PersistedWebLogs } from "./modules/web";
+import {
+  buildAdminCss,
+  buildChannelListPage,
+  buildSettingsPage,
+  buildWebUiSettings,
+  createWebModule,
+  DEFAULT_WEB_UI_SETTINGS,
+  isWebDisplayOrder,
+  type PersistedWebLogs,
+  type WebUiSettings,
+} from "./modules/web";
 import { extractUrlMetadata } from "./modules/url-metadata";
 import { buildProxyConfigFromEnv, type ProxyConfig } from "./proxy-config";
-import CSS from "./templates/style.css";
 import LOGIN_TEMPLATE from "./templates/login.html";
 
 const reconnectDelayMs = 5_000;
 const webLogsStorageKey = "web:logs:v1";
+const webUiSettingsStorageKey = "web:ui-settings:v1";
 const webAuthCookieName = "apricot_web_auth";
-const displayOrderCookieName = "apricot_display_order";
 const nickErrorCodes = new Set(["431", "432", "433", "436", "437", "438", "447", "484", "485"]);
 
 export class IrcProxyDO implements DurableObject {
@@ -40,6 +49,7 @@ export class IrcProxyDO implements DurableObject {
 
   /** Web module instance (holds per-DO message buffers) */
   private readonly web: ReturnType<typeof createWebModule>;
+  private webUiSettings: WebUiSettings = buildWebUiSettings();
 
   /** Keepalive alarm interval in ms */
   private keepaliveMs: number;
@@ -82,6 +92,7 @@ export class IrcProxyDO implements DurableObject {
     this.modules.register(createClientSyncModule(this.channelStates));
 
     void this.state.blockConcurrencyWhile(async () => {
+      await this.loadPersistedWebUiSettings();
       await this.loadPersistedWebLogs();
       await this.handleStartupAutoConnect();
     });
@@ -96,6 +107,7 @@ export class IrcProxyDO implements DurableObject {
     const webBase = `${proxyPrefix}/web`;
     const isWebLoginPath = url.pathname === "/web/login" || url.pathname === "/web/login/";
     const isWebLogoutPath = url.pathname === "/web/logout" || url.pathname === "/web/logout/";
+    const isWebSettingsPath = url.pathname === "/web/settings" || url.pathname === "/web/settings/";
     const isProtectedWebRequest = (
       url.pathname === "/web" ||
       url.pathname === "/web/" ||
@@ -219,26 +231,24 @@ export class IrcProxyDO implements DurableObject {
       return new Response("Method Not Allowed", { status: 405 });
     }
 
-    // POST /web/display-order — set display order preference cookie
-    if (request.method === "POST" && (url.pathname === "/web/display-order" || url.pathname === "/web/display-order/")) {
-      const formData = await request.formData();
-      const order = formData.get("order") as string | null;
-      const value = order === "asc" ? "asc" : "desc";
-      const isSecure = new URL(request.url).protocol === "https:";
-      const cookieStr = [
-        `${displayOrderCookieName}=${value}`,
-        `Path=${proxyPrefix}/web`,
-        "SameSite=Strict",
-        "Max-Age=31536000",
-        ...(isSecure ? ["Secure"] : []),
-      ].join("; ");
-      return new Response(null, {
-        status: 302,
-        headers: {
-          Location: `${webBase}/`,
-          "Set-Cookie": cookieStr,
-        },
-      });
+    if (isWebSettingsPath && !this.canEditWebSettings()) {
+      return new Response("Not found", { status: 404 });
+    }
+
+    if (request.method === "GET" && isWebSettingsPath) {
+      return this.renderWebSettingsPage(webBase);
+    }
+
+    if (request.method === "POST" && isWebSettingsPath) {
+      return this.handleWebSettings(request, webBase);
+    }
+
+    if (isWebSettingsPath) {
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+
+    if (url.pathname === "/web/display-order" || url.pathname === "/web/display-order/") {
+      return new Response("Not found", { status: 404 });
     }
 
     // POST /web/join — join a channel from web UI
@@ -269,7 +279,6 @@ export class IrcProxyDO implements DurableObject {
 
     // GET /web — channel list
     if (url.pathname === "/web" || url.pathname === "/web/") {
-      const displayOrder = this.getDisplayOrder(request);
       const html = buildChannelListPage(
         this.channels,
         this.nick,
@@ -277,7 +286,7 @@ export class IrcProxyDO implements DurableObject {
         this.serverConn?.connected ?? false,
         webBase,
         Boolean(this.config?.password),
-        displayOrder
+        this.canEditWebSettings()
       );
       return new Response(html, {
         headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -329,7 +338,7 @@ export class IrcProxyDO implements DurableObject {
         this.nick,
         webBase,
         Boolean(this.config?.password),
-        this.getDisplayOrder(request)
+        this.webUiSettings
       );
       return new Response(html, {
         headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -951,6 +960,11 @@ export class IrcProxyDO implements DurableObject {
     this.web.hydrateLogs(logs ?? null);
   }
 
+  private async loadPersistedWebUiSettings(): Promise<void> {
+    const stored = await this.state.storage.get<Partial<WebUiSettings>>(webUiSettingsStorageKey);
+    this.webUiSettings = this.normalizeStoredWebUiSettings(stored);
+  }
+
   private async persistCurrentWebLogs(): Promise<void> {
     await this.persistWebLogs(this.web.snapshotLogs());
   }
@@ -961,6 +975,11 @@ export class IrcProxyDO implements DurableObject {
     } catch (error) {
       console.error("Failed to persist web logs", error);
     }
+  }
+
+  private async persistWebUiSettings(settings: WebUiSettings): Promise<void> {
+    this.webUiSettings = settings;
+    await this.state.storage.put(webUiSettingsStorageKey, settings);
   }
 
   private async isWebAuthenticated(request: Request, proxyPrefix: string): Promise<boolean> {
@@ -978,9 +997,8 @@ export class IrcProxyDO implements DurableObject {
     return actual === expected;
   }
 
-  private getDisplayOrder(request: Request): "asc" | "desc" {
-    const cookies = this.parseCookies(request.headers.get("Cookie"));
-    return cookies.get(displayOrderCookieName) === "asc" ? "asc" : "desc";
+  private canEditWebSettings(): boolean {
+    return Boolean(this.config?.password);
   }
 
   private parseCookies(cookieHeader: string | null): Map<string, string> {
@@ -1028,17 +1046,152 @@ export class IrcProxyDO implements DurableObject {
     ].join("; ");
   }
 
+  private async handleWebSettings(
+    request: Request,
+    webBase: string
+  ): Promise<Response> {
+    const formData = await request.formData();
+    const validation = this.validateWebUiSettingsForm(formData);
+    if (validation.errorMessage) {
+      return this.renderWebSettingsPage(webBase, validation.settings, validation.errorMessage, 400);
+    }
+
+    await this.persistWebUiSettings(validation.settings);
+    return new Response(null, {
+      status: 302,
+      headers: { Location: `${webBase}/` },
+    });
+  }
+
+  private validateWebUiSettingsForm(formData: FormData): {
+    settings: WebUiSettings;
+    errorMessage?: string;
+  } {
+    const fontFamily = (formData.get("fontFamily") as string | null)?.trim() ?? "";
+    if (!fontFamily || fontFamily.length > 200) {
+      return {
+        settings: { ...this.webUiSettings, fontFamily: fontFamily || this.webUiSettings.fontFamily },
+        errorMessage: "Font family は 1〜200 文字で入力してください",
+      };
+    }
+
+    const fontSizeRaw = (formData.get("fontSizePx") as string | null)?.trim() ?? "";
+    const fontSizePx = Number.parseInt(fontSizeRaw, 10);
+    if (!Number.isInteger(fontSizePx) || fontSizePx < 10 || fontSizePx > 32) {
+      return {
+        settings: { ...this.webUiSettings },
+        errorMessage: "Font size は 10〜32 の整数で入力してください",
+      };
+    }
+
+    const textColor = (formData.get("textColor") as string | null)?.trim() ?? "";
+    const surfaceColor = (formData.get("surfaceColor") as string | null)?.trim() ?? "";
+    const surfaceAltColor = (formData.get("surfaceAltColor") as string | null)?.trim() ?? "";
+    const accentColor = (formData.get("accentColor") as string | null)?.trim() ?? "";
+    const colors = { textColor, surfaceColor, surfaceAltColor, accentColor } satisfies Record<string, string>;
+    for (const [fieldName, value] of Object.entries(colors)) {
+      if (!/^#[0-9A-Fa-f]{6}$/.test(value)) {
+        return {
+          settings: { ...this.webUiSettings },
+          errorMessage: `${fieldName} は #RRGGBB 形式で入力してください`,
+        };
+      }
+    }
+
+    const displayOrder = (formData.get("displayOrder") as string | null)?.trim() ?? "";
+    if (!isWebDisplayOrder(displayOrder)) {
+      return {
+        settings: { ...this.webUiSettings },
+        errorMessage: "Display order は asc または desc を指定してください",
+      };
+    }
+
+    const extraCss = (formData.get("extraCss") as string | null) ?? "";
+    if (extraCss.length > 10_240) {
+      return {
+        settings: { ...this.webUiSettings, fontFamily, fontSizePx, textColor, surfaceColor, surfaceAltColor, accentColor, displayOrder, extraCss },
+        errorMessage: "Extra CSS は 10KB 以下にしてください",
+      };
+    }
+
+    return {
+      settings: buildWebUiSettings({
+        fontFamily,
+        fontSizePx,
+        textColor,
+        surfaceColor,
+        surfaceAltColor,
+        accentColor,
+        displayOrder,
+        extraCss,
+      }),
+    };
+  }
+
+  private normalizeStoredWebUiSettings(stored?: Partial<WebUiSettings>): WebUiSettings {
+    if (!stored) {
+      return { ...DEFAULT_WEB_UI_SETTINGS };
+    }
+
+    const isValidColor = (value: string | undefined): value is string => (
+      typeof value === "string" && /^#[0-9A-Fa-f]{6}$/.test(value)
+    );
+    const fontFamily = typeof stored.fontFamily === "string" && stored.fontFamily.trim() && stored.fontFamily.length <= 200
+      ? stored.fontFamily.trim()
+      : DEFAULT_WEB_UI_SETTINGS.fontFamily;
+    const fontSizePx = Number.isInteger(stored.fontSizePx) && stored.fontSizePx! >= 10 && stored.fontSizePx! <= 32
+      ? stored.fontSizePx!
+      : DEFAULT_WEB_UI_SETTINGS.fontSizePx;
+    const displayOrder = stored.displayOrder && isWebDisplayOrder(stored.displayOrder)
+      ? stored.displayOrder
+      : DEFAULT_WEB_UI_SETTINGS.displayOrder;
+    const extraCss = typeof stored.extraCss === "string" && stored.extraCss.length <= 10_240
+      ? stored.extraCss
+      : DEFAULT_WEB_UI_SETTINGS.extraCss;
+
+    return buildWebUiSettings({
+      fontFamily,
+      fontSizePx,
+      textColor: isValidColor(stored.textColor) ? stored.textColor : DEFAULT_WEB_UI_SETTINGS.textColor,
+      surfaceColor: isValidColor(stored.surfaceColor) ? stored.surfaceColor : DEFAULT_WEB_UI_SETTINGS.surfaceColor,
+      surfaceAltColor: isValidColor(stored.surfaceAltColor) ? stored.surfaceAltColor : DEFAULT_WEB_UI_SETTINGS.surfaceAltColor,
+      accentColor: isValidColor(stored.accentColor) ? stored.accentColor : DEFAULT_WEB_UI_SETTINGS.accentColor,
+      displayOrder,
+      extraCss,
+    });
+  }
+
+  private renderWebSettingsPage(
+    webBase: string,
+    settings = this.webUiSettings,
+    errorMessage = "",
+    status = 200
+  ): Response {
+    const html = buildSettingsPage(
+      this.nick,
+      this.serverName,
+      webBase,
+      settings,
+      errorMessage
+    );
+
+    return new Response(html, {
+      status,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
   private renderWebLoginPage(
     actionUrl: string,
     errorMessage = "",
     status = 200
   ): Response {
     const errorHtml = errorMessage
-      ? `<div class="login-error">${errorMessage}</div>`
+      ? `<div class="admin-message admin-message--danger" role="alert"><strong>ログインに失敗しました。</strong><span>${errorMessage}</span></div>`
       : "";
 
     const html = LOGIN_TEMPLATE
-      .replace("{{CSS}}", CSS)
+      .replace("{{CSS}}", buildAdminCss())
       .replace("{{ERROR}}", errorHtml)
       .replace("{{ACTION_URL}}", actionUrl);
 

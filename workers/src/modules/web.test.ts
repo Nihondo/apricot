@@ -1,13 +1,26 @@
 import { describe, expect, it, vi } from "vitest";
 import type { ModuleContext } from "../module-system";
 
+vi.mock("../templates/admin-style.css", () => ({ default: "ADMIN_CSS" }));
 vi.mock("../templates/style.css", () => ({ default: "" }));
 vi.mock("../templates/channel.html", () => ({
   default: "<html><body>{{INPUT_BAR_POSITION}}{{RELOAD_BUTTON}}{{CONTENT_PADDING}}<h1>{{CHANNEL}}</h1><div>{{TOPIC}}</div><form action=\"{{ACTION_URL}}\"></form>{{MESSAGES}}</body></html>",
 }));
-vi.mock("../templates/channel-list.html", () => ({ default: "{{DISPLAY_ORDER_TOGGLE}}{{CHANNEL_LINKS}}" }));
+vi.mock("../templates/channel-list.html", () => ({
+  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</body></html>",
+}));
+vi.mock("../templates/settings.html", () => ({
+  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{ERROR}}この設定はチャンネル画面にのみ適用されます。<form action=\"{{ACTION_URL}}\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><textarea>{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form></body></html>",
+}));
 
-import { createWebModule, type PersistedWebLogs } from "./web";
+import {
+  buildAdminCss,
+  buildChannelCss,
+  buildSettingsPage,
+  buildWebUiSettings,
+  createWebModule,
+  type PersistedWebLogs,
+} from "./web";
 
 function makeContext(overrides: Partial<ModuleContext> = {}): ModuleContext {
   return {
@@ -99,7 +112,14 @@ describe("createWebModule", () => {
       params: ["#general", "second"],
     });
 
-    const html = web.buildChannelPage("#general", "", "apricot", "/proxy/main/web", false, "desc");
+    const html = web.buildChannelPage(
+      "#general",
+      "",
+      "apricot",
+      "/proxy/main/web",
+      false,
+      buildWebUiSettings({ displayOrder: "desc" })
+    );
     const firstIdx = html.indexOf("first");
     const secondIdx = html.indexOf("second");
     expect(secondIdx).toBeLessThan(firstIdx); // 新しい順（secondが上）
@@ -123,7 +143,14 @@ describe("createWebModule", () => {
       params: ["#general", "second"],
     });
 
-    const html = web.buildChannelPage("#general", "", "apricot", "/proxy/main/web", false, "asc");
+    const html = web.buildChannelPage(
+      "#general",
+      "",
+      "apricot",
+      "/proxy/main/web",
+      false,
+      buildWebUiSettings({ displayOrder: "asc" })
+    );
     const firstIdx = html.indexOf("first");
     const secondIdx = html.indexOf("second");
     expect(firstIdx).toBeLessThan(secondIdx); // 古い順（firstが上）
@@ -149,5 +176,43 @@ describe("createWebModule", () => {
     expect(restored["#general"]).toHaveLength(200);
     expect(restored["#general"][0].text).toBe("msg-50");
     expect(restored["#general"][199].text).toBe("msg-249");
+  });
+
+  it("builds channel CSS with overrides and extra CSS appended", () => {
+    const css = buildChannelCss(buildWebUiSettings({
+      fontFamily: "\"Fira Sans\", sans-serif",
+      fontSizePx: 18,
+      textColor: "#123456",
+      surfaceColor: "#ABCDEF",
+      surfaceAltColor: "#FEDCBA",
+      accentColor: "#0F0F0F",
+      extraCss: ".custom { color: red; }",
+    }));
+
+    expect(css).toContain("font-family: \"Fira Sans\", sans-serif;");
+    expect(css).toContain("font-size: 18px;");
+    expect(css).toContain("--textcolor: #123456;");
+    expect(css).toContain(".custom { color: red; }");
+  });
+
+  it("builds fixed admin CSS separately from channel customization", () => {
+    expect(buildAdminCss()).toBe("ADMIN_CSS");
+  });
+
+  it("builds the settings page with current values and error text", () => {
+    const html = buildSettingsPage(
+      "apricot",
+      "irc.example.com",
+      "/proxy/main/web",
+      buildWebUiSettings({ displayOrder: "asc", extraCss: "body { color: blue; }" }),
+      "入力エラー"
+    );
+
+    expect(html).toContain("/proxy/main/web/settings");
+    expect(html).toContain("body { color: blue; }");
+    expect(html).toContain("この設定はチャンネル画面にのみ適用されます。");
+    expect(html).toContain("入力エラー");
+    expect(html).toContain("checked");
+    expect(html).toContain("ADMIN_CSS");
   });
 });

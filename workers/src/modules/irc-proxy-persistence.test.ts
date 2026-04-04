@@ -3,21 +3,26 @@ import { describe, expect, it, vi } from "vitest";
 vi.mock("cloudflare:sockets", () => ({
   connect: vi.fn(),
 }));
+vi.mock("../templates/admin-style.css", () => ({ default: "ADMIN_CSS" }));
 vi.mock("../templates/style.css", () => ({ default: "" }));
 vi.mock("../templates/channel.html", () => ({
-  default: "<html><body><form action=\"{{LOGOUT_URL}}\"></form><h1>{{CHANNEL}}</h1><div>{{TOPIC}}</div>{{MESSAGES}}</body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{LOGOUT_FORM}}<div style=\"{{CONTENT_PADDING}}\">{{INPUT_BAR_POSITION}}{{RELOAD_BUTTON}}<h1>{{CHANNEL}}</h1><div>{{TOPIC}}</div>{{MESSAGES}}</div></body></html>",
 }));
 vi.mock("../templates/channel-list.html", () => ({
-  default: "<html><body><form action=\"{{LOGOUT_URL}}\"></form>{{CHANNEL_LINKS}}</body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</body></html>",
 }));
 vi.mock("../templates/login.html", () => ({
-  default: "<html><body>{{ERROR}}<form action=\"{{ACTION_URL}}\" method=\"POST\"><input name=\"password\"></form></body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{ERROR}}<form action=\"{{ACTION_URL}}\" method=\"POST\"><input name=\"password\"></form></body></html>",
+}));
+vi.mock("../templates/settings.html", () => ({
+  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}この設定はチャンネル画面にのみ適用されます。{{ERROR}}<form action=\"{{ACTION_URL}}\" method=\"POST\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\"><input name=\"textColor\" value=\"{{TEXT_COLOR}}\"><input name=\"surfaceColor\" value=\"{{SURFACE_COLOR}}\"><input name=\"surfaceAltColor\" value=\"{{SURFACE_ALT_COLOR}}\"><input name=\"accentColor\" value=\"{{ACCENT_COLOR}}\"><textarea name=\"extraCss\">{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form></body></html>",
 }));
 
 import { IrcProxyDO } from "../irc-proxy";
-import type { PersistedWebLogs } from "./web";
+import type { PersistedWebLogs, WebUiSettings } from "./web";
 
 const webLogsStorageKey = "web:logs:v1";
+const webUiSettingsStorageKey = "web:ui-settings:v1";
 
 class FakeStorage {
   private values = new Map<string, unknown>();
@@ -194,6 +199,21 @@ describe("IrcProxyDO web log persistence", () => {
     expect(response.headers.get("Location")).toBe("/proxy/main/web/login");
   });
 
+  it("returns 404 for /web/settings when CLIENT_PASSWORD is not configured", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: undefined })
+    );
+    await state.initPromise;
+
+    const response = await proxy.fetch(new Request("https://example.com/web/settings", {
+      headers: { "X-Proxy-Prefix": "/proxy/main" },
+    }));
+
+    expect(response.status).toBe(404);
+  });
+
   it("renders login page errors with 401 on wrong password", async () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
@@ -250,6 +270,203 @@ describe("IrcProxyDO web log persistence", () => {
     }));
 
     expect(pageResponse.status).toBe(200);
+  });
+
+  it("renders persisted settings in the authenticated settings page", async () => {
+    const state = new FakeState();
+    state.storage.seed(webUiSettingsStorageKey, {
+      fontFamily: "\"Fira Sans\", sans-serif",
+      fontSizePx: 18,
+      textColor: "#123456",
+      surfaceColor: "#ABCDEF",
+      surfaceAltColor: "#FEDCBA",
+      accentColor: "#0F0F0F",
+      displayOrder: "asc",
+      extraCss: "body { color: blue; }",
+    } satisfies WebUiSettings);
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+
+    const loginResponse = await proxy.fetch(new Request("https://example.com/web/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "password=secret",
+    }));
+    const cookieHeader = loginResponse.headers.get("Set-Cookie")?.split(";")[0] ?? "";
+
+    const response = await proxy.fetch(new Request("https://example.com/web/settings", {
+      headers: {
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+    }));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("&quot;Fira Sans&quot;, sans-serif");
+    expect(html).toContain("body { color: blue; }");
+    expect(html).toContain("この設定はチャンネル画面にのみ適用されます。");
+    expect(html).toContain("ADMIN_CSS");
+    expect(html).not.toContain("font-size: 18px;");
+    expect(html).toContain("/proxy/main/web/");
+  });
+
+  it("persists web UI settings and applies them across list, channel, and login pages", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+
+    const loginResponse = await proxy.fetch(new Request("https://example.com/web/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "password=secret",
+    }));
+    const cookieHeader = loginResponse.headers.get("Set-Cookie")?.split(";")[0] ?? "";
+
+    const response = await proxy.fetch(new Request("https://example.com/web/settings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: [
+        "fontFamily=%22Fira%20Sans%22%2C%20sans-serif",
+        "fontSizePx=18",
+        "textColor=%23123456",
+        "surfaceColor=%23ABCDEF",
+        "surfaceAltColor=%23FEDCBA",
+        "accentColor=%230F0F0F",
+        "displayOrder=asc",
+        "extraCss=body%20%7B%20color%3A%20blue%3B%20%7D",
+      ].join("&"),
+    }));
+
+    expect(response.status).toBe(302);
+    expect(response.headers.get("Location")).toBe("/proxy/main/web/");
+    expect(state.storage.read<WebUiSettings>(webUiSettingsStorageKey)).toEqual({
+      fontFamily: "\"Fira Sans\", sans-serif",
+      fontSizePx: 18,
+      textColor: "#123456",
+      surfaceColor: "#ABCDEF",
+      surfaceAltColor: "#FEDCBA",
+      accentColor: "#0F0F0F",
+      displayOrder: "asc",
+      extraCss: "body { color: blue; }",
+    });
+
+    await (proxy as any).handleServerMessage({
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "hello"],
+    });
+
+    const listPage = await proxy.fetch(new Request("https://example.com/web/", {
+      headers: {
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+    }));
+    const listHtml = await listPage.text();
+    expect(listHtml).toContain("Settings");
+    expect(listHtml).toContain("ADMIN_CSS");
+    expect(listHtml).not.toContain("font-size: 18px;");
+    expect(listHtml).not.toContain("body { color: blue; }</style>");
+
+    const channelPage = await proxy.fetch(new Request("https://example.com/web/%23general", {
+      headers: {
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+    }));
+    const channelHtml = await channelPage.text();
+    expect(channelHtml).toContain("padding-bottom:45px;");
+    expect(channelHtml).not.toContain("Reload");
+    expect(channelHtml).toContain("body { color: blue; }");
+    expect(channelHtml).not.toContain("Settings");
+
+    const loginPage = await proxy.fetch(new Request("https://example.com/web/login", {
+      headers: { "X-Proxy-Prefix": "/proxy/main" },
+    }));
+    const loginHtml = await loginPage.text();
+    expect(loginHtml).toContain("ADMIN_CSS");
+    expect(loginHtml).not.toContain("font-size: 18px;");
+    expect(loginHtml).not.toContain("body { color: blue; }</style>");
+  });
+
+  it("rejects invalid web UI settings without persisting them", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+
+    const loginResponse = await proxy.fetch(new Request("https://example.com/web/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "password=secret",
+    }));
+    const cookieHeader = loginResponse.headers.get("Set-Cookie")?.split(";")[0] ?? "";
+
+    const response = await proxy.fetch(new Request("https://example.com/web/settings", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "fontFamily=test&fontSizePx=9&textColor=%23000000&surfaceColor=%23FFFFFF&surfaceAltColor=%23EEEEEE&accentColor=%230000FF&displayOrder=desc&extraCss=",
+    }));
+    const html = await response.text();
+
+    expect(response.status).toBe(400);
+    expect(html).toContain("Font size は 10〜32 の整数で入力してください");
+    expect(state.storage.read(webUiSettingsStorageKey)).toBeUndefined();
+  });
+
+  it("returns 404 for the removed /web/display-order route", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+
+    const loginResponse = await proxy.fetch(new Request("https://example.com/web/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "password=secret",
+    }));
+    const cookieHeader = loginResponse.headers.get("Set-Cookie")?.split(";")[0] ?? "";
+
+    const response = await proxy.fetch(new Request("https://example.com/web/display-order", {
+      method: "POST",
+      headers: {
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+    }));
+
+    expect(response.status).toBe(404);
   });
 
   it("requires the auth cookie for posting from the web UI", async () => {

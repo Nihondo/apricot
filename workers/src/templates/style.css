@@ -62,20 +62,11 @@ a {
   word-break: break-all;
 }
 a:hover { text-decoration: underline; }
+input:focus { outline: none; }
 .topic { font-weight: bold; margin-bottom: 5px; }
 .input-bar {
   position: fixed; left: 0; z-index: 2;
   width: 100%;
-}
-/* フォーカス時にアウトラインを一旦消す */
-input:focus,
-textarea:focus {
-  outline: none;
-}
-input:focus-visible,
-textarea:focus-visible {
-  outline: 2px solid var(--border-color);
-  outline-offset: 2px;
 }
 .top { top: 0; }
 .bottom { bottom: 0; }
@@ -150,7 +141,17 @@ textarea:focus-visible {
 .web-auth-bar {
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
   padding: 6px 8px 0;
+}
+.toolbar-link {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--border-color);
+  background: transparent;
+  color: var(--textcolor);
+  padding: 4px 10px;
+  cursor: pointer;
 }
 .logout-button {
   -webkit-appearance: none; appearance: none;
@@ -211,6 +212,65 @@ textarea:focus-visible {
 }
 .login-error {
   margin-bottom: 10px;
+  color: var(--accent-username);
+  font-weight: bold;
+}
+.settings-shell {
+  padding: 16px;
+}
+.settings-card {
+  width: min(720px, 100%);
+  border: 1px solid var(--border-color);
+  background: var(--rowcolor1);
+  padding: 16px;
+  margin: 0 auto;
+}
+.settings-form {
+  display: grid;
+  gap: 12px;
+}
+.settings-field {
+  display: grid;
+  gap: 6px;
+}
+.settings-fieldset {
+  border: 1px solid var(--border-color);
+  padding: 10px 12px;
+}
+.settings-input,
+.settings-textarea {
+  -webkit-appearance: none; appearance: none;
+  width: 100%;
+  color: var(--textcolor);
+  background-color: var(--rowcolor0);
+  border: 1px solid var(--border-color);
+  padding: 8px 10px;
+}
+.settings-input {
+  min-height: 40px;
+}
+.settings-color-input {
+  padding: 4px;
+}
+.settings-textarea {
+  resize: vertical;
+}
+.settings-radio-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 12px;
+}
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+.settings-submit-button {
+  width: auto;
+  padding: 0 16px;
+}
+.settings-error {
+  margin-bottom: 12px;
   color: var(--accent-username);
   font-weight: bold;
 }

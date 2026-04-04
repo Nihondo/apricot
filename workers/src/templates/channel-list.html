@@ -4,14 +4,36 @@
 <meta name="viewport" content="width=device-width, user-scalable=no">
 <title>apricot - channels</title>
 <style>{{CSS}}</style>
-</head><body>
-<div class="status-bar">
-  {{STATUS_ICON}} {{NICK}}@{{SERVER_NAME}}
-</div>
-{{LOGOUT_FORM}}
-{{DISPLAY_ORDER_TOGGLE}}
-<div class="channel-list">
-  <h3>Channels</h3>
-  {{CHANNEL_LINKS}}
+</head><body class="admin-page">
+<div class="admin-shell">
+  <header class="admin-page-header">
+    <div class="admin-page-header__eyebrow">Web UI</div>
+    <div class="admin-page-header__row">
+      <div class="admin-page-header__copy">
+        <h1 class="admin-page-title">Channels</h1>
+        <p class="admin-page-description">{{NICK}} on {{SERVER_NAME}} の参加チャンネル一覧です。</p>
+      </div>
+      <div class="admin-action-bar">
+        {{TOP_ACTIONS}}
+      </div>
+    </div>
+    <div class="admin-meta-row">
+      <span class="admin-status-badge {{STATUS_CLASS}}">{{STATUS_ICON}} {{STATUS_TEXT}}</span>
+      <span class="admin-meta-chip">Server: {{SERVER_NAME}}</span>
+      <span class="admin-meta-chip">Nick: {{NICK}}</span>
+    </div>
+  </header>
+
+  <section class="admin-panel">
+    <div class="admin-panel__header">
+      <div>
+        <h2 class="admin-section-title">Joined channels</h2>
+        <p class="admin-section-description">{{CHANNEL_COUNT}}</p>
+      </div>
+    </div>
+    <div class="admin-list">
+      {{CHANNEL_LINKS}}
+    </div>
+  </section>
 </div>
 </body></html>
