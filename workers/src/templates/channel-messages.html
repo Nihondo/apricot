@@ -6,15 +6,12 @@
 <style>{{CSS}}</style>
 <script>
 window.addEventListener('load', function () {
-  setInterval(function () {
-    location.reload();
-  }, 30000);
   {{AUTO_SCROLL_SCRIPT}}
 });
 </script>
 </head>
 <body class="channel-messages-page">
-<div class="channel-messages-shell">
+<div id="channel-messages-shell" class="channel-messages-shell">
   {{MESSAGES}}
 </div>
 {{RELOAD_BUTTON}}

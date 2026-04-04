@@ -37,6 +37,11 @@ const webLogsStorageKey = "web:logs:v1";
 const webUiSettingsStorageKey = "web:ui-settings:v1";
 const webAuthCookieName = "apricot_web_auth";
 const nickErrorCodes = new Set(["431", "432", "433", "436", "437", "438", "447", "484", "485"]);
+type WebChannelUpdateMessage = {
+  type: "channel-updated";
+  channel: string;
+  revision: number;
+};
 const webUiColorFieldNames: Array<keyof WebUiColorSettings> = [
   "textColor",
   "surfaceColor",
@@ -68,6 +73,8 @@ export class IrcProxyDO implements DurableObject {
 
   /** Per-WebSocket pending password during registration */
   private pendingPasswords = new Map<WebSocket, string>();
+  private webUpdateSubscribers = new Map<WebSocket, string>();
+  private channelRevisions = new Map<string, number>();
 
   /** Web module instance (holds per-DO message buffers) */
   private readonly web: ReturnType<typeof createWebModule>;
@@ -102,7 +109,10 @@ export class IrcProxyDO implements DurableObject {
       async (logs) => {
         await this.persistWebLogs(logs);
       },
-      webLogMaxLines
+      webLogMaxLines,
+      (channels) => {
+        this.handleChannelLogsChanged(channels);
+      }
     );
 
     // Module registration order matters for QUIT/NICK:
@@ -122,6 +132,7 @@ export class IrcProxyDO implements DurableObject {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    const webUpdatesMatch = url.pathname.match(/^\/web\/(.+)\/updates\/?$/);
 
     // Base path for web interface URLs (links, form actions, redirects).
     // index.ts injects this header so paths work from the browser's perspective.
@@ -136,7 +147,11 @@ export class IrcProxyDO implements DurableObject {
       /^\/web\/.+$/.test(url.pathname)
     ) && !isWebLoginPath && !isWebLogoutPath;
 
-    if (isProtectedWebRequest && !await this.isWebAuthenticated(request, proxyPrefix)) {
+    if (webUpdatesMatch && !await this.isWebAuthenticated(request, proxyPrefix)) {
+      return new Response("Unauthorized", { status: 401 });
+    }
+
+    if (isProtectedWebRequest && !webUpdatesMatch && !await this.isWebAuthenticated(request, proxyPrefix)) {
       return this.redirectToWebLogin(webBase);
     }
 
@@ -312,6 +327,16 @@ export class IrcProxyDO implements DurableObject {
       });
     }
 
+    const webMessagesFragmentMatch = url.pathname.match(/^\/web\/(.+)\/messages\/fragment\/?$/);
+    if (webMessagesFragmentMatch) {
+      if (request.method !== "GET") {
+        return new Response("Method Not Allowed", { status: 405 });
+      }
+      return this.renderWebChannelMessagesFragment(
+        decodeURIComponent(webMessagesFragmentMatch[1])
+      );
+    }
+
     const webMessagesMatch = url.pathname.match(/^\/web\/(.+)\/messages\/?$/);
     if (webMessagesMatch) {
       if (request.method !== "GET") {
@@ -320,6 +345,13 @@ export class IrcProxyDO implements DurableObject {
       return this.renderWebChannelMessagesPage(
         decodeURIComponent(webMessagesMatch[1])
       );
+    }
+
+    if (webUpdatesMatch) {
+      if (request.headers.get("Upgrade") !== "websocket") {
+        return new Response("Expected WebSocket", { status: 426 });
+      }
+      return this.acceptWebUpdatesSocket(decodeURIComponent(webUpdatesMatch[1]));
     }
 
     const webComposerMatch = url.pathname.match(/^\/web\/(.+)\/composer\/?$/);
@@ -353,6 +385,10 @@ export class IrcProxyDO implements DurableObject {
     ws: WebSocket,
     message: string | ArrayBuffer
   ): Promise<void> {
+    if (this.webUpdateSubscribers.has(ws)) {
+      return;
+    }
+
     if (typeof message !== "string") return;
 
     // Handle multiple lines (some clients batch commands)
@@ -388,6 +424,9 @@ export class IrcProxyDO implements DurableObject {
     _reason: string,
     _wasClean: boolean
   ): Promise<void> {
+    if (this.webUpdateSubscribers.delete(ws)) {
+      return;
+    }
     this.clients.delete(ws);
     this.pendingPasswords.delete(ws);
     const ctx = this.makeContext(0);
@@ -395,6 +434,9 @@ export class IrcProxyDO implements DurableObject {
   }
 
   async webSocketError(ws: WebSocket, _error: unknown): Promise<void> {
+    if (this.webUpdateSubscribers.delete(ws)) {
+      return;
+    }
     this.clients.delete(ws);
     this.pendingPasswords.delete(ws);
   }
@@ -725,14 +767,28 @@ export class IrcProxyDO implements DurableObject {
   }
 
   private renderWebChannelMessagesPage(channel: string): Response {
+    const revision = this.getChannelRevision(channel);
     const html = this.web.buildChannelMessagesPage(
       channel,
       this.getChannelTopic(channel),
       this.nick,
+      this.webUiSettings,
+      revision
+    );
+    return new Response(html, {
+      headers: this.buildWebMessagesHeaders(revision),
+    });
+  }
+
+  private renderWebChannelMessagesFragment(channel: string): Response {
+    const revision = this.getChannelRevision(channel);
+    const html = this.web.buildChannelMessagesFragment(
+      channel,
+      this.nick,
       this.webUiSettings
     );
     return new Response(html, {
-      headers: { "Content-Type": "text/html; charset=utf-8" },
+      headers: this.buildWebMessagesHeaders(revision),
     });
   }
 
@@ -1156,6 +1212,66 @@ export class IrcProxyDO implements DurableObject {
   private async persistWebUiSettings(settings: WebUiSettings): Promise<void> {
     this.webUiSettings = settings;
     await this.state.storage.put(webUiSettingsStorageKey, settings);
+  }
+
+  private buildWebMessagesHeaders(revision: number): HeadersInit {
+    return {
+      "Content-Type": "text/html; charset=utf-8",
+      "X-Apricot-Channel-Revision": String(revision),
+      "Cache-Control": "no-store",
+    };
+  }
+
+  private getChannelRevision(channel: string): number {
+    return this.channelRevisions.get(channel.toLowerCase()) ?? 0;
+  }
+
+  private handleChannelLogsChanged(channels: string[]): void {
+    for (const channel of channels) {
+      const revision = this.bumpChannelRevision(channel);
+      this.broadcastWebChannelUpdate(channel, revision);
+    }
+  }
+
+  private bumpChannelRevision(channel: string): number {
+    const normalizedChannel = channel.toLowerCase();
+    const nextRevision = (this.channelRevisions.get(normalizedChannel) ?? 0) + 1;
+    this.channelRevisions.set(normalizedChannel, nextRevision);
+    return nextRevision;
+  }
+
+  private broadcastWebChannelUpdate(channel: string, revision: number): void {
+    const normalizedChannel = channel.toLowerCase();
+    const payload: WebChannelUpdateMessage = {
+      type: "channel-updated",
+      channel,
+      revision,
+    };
+    const serializedPayload = JSON.stringify(payload);
+    for (const [ws, subscribedChannel] of this.webUpdateSubscribers) {
+      if (subscribedChannel !== normalizedChannel) {
+        continue;
+      }
+      try {
+        ws.send(serializedPayload);
+      } catch {
+        this.webUpdateSubscribers.delete(ws);
+      }
+    }
+  }
+
+  private acceptWebUpdatesSocket(channel: string): Response {
+    const pair = new WebSocketPair();
+    const [client, server] = [pair[0], pair[1]];
+    this.webUpdateSubscribers.set(server, channel.toLowerCase());
+    this.state.acceptWebSocket(server);
+    const payload: WebChannelUpdateMessage = {
+      type: "channel-updated",
+      channel,
+      revision: this.getChannelRevision(channel),
+    };
+    server.send(JSON.stringify(payload));
+    return new Response(null, { status: 101, webSocket: client });
   }
 
   private async isWebAuthenticated(request: Request, proxyPrefix: string): Promise<boolean> {

@@ -14,7 +14,7 @@ vi.mock("../../src/templates/channel.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body><div class=\"shell\">{{FRAME_CONTENT}}</div></body></html>",
 }));
 vi.mock("../../src/templates/channel-messages.html", () => ({
-  default: "<html><head><style>{{CSS}}</style><script>{{AUTO_SCROLL_SCRIPT}}</script></head><body>{{MESSAGES}}{{RELOAD_BUTTON}}</body></html>",
+  default: "<html><head><style>{{CSS}}</style><script>{{AUTO_SCROLL_SCRIPT}}</script></head><body><div id=\"channel-messages-shell\">{{MESSAGES}}</div>{{RELOAD_BUTTON}}</body></html>",
 }));
 vi.mock("../../src/templates/channel-composer.html", () => ({
   default: "<html><head><style>{{CSS}}</style><script>{{ON_LOAD_SCRIPT}}</script></head><body>{{FLASH_MESSAGE}}<form action=\"{{ACTION_URL}}\">{{CHANNEL_LIST_LINK}}<input name=\"message\" value=\"{{MESSAGE_VALUE}}\"><button>送信</button></form></body></html>",
@@ -115,6 +115,22 @@ describe("createWebModule", () => {
     expect(html).toContain("alice&gt;");
   });
 
+  it("builds the same message markup for the fragment renderer", async () => {
+    const web = createWebModule(new Map(), 0);
+    const ctx = makeContext();
+
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "fragment line"],
+    });
+
+    const fragment = web.buildChannelMessagesFragment("#general", "apricot");
+
+    expect(fragment).toContain("fragment line");
+    expect(fragment).toContain("alice&gt;");
+  });
+
   it("buildChannelPage desc: composer iframe is placed before messages iframe", async () => {
     const web = createWebModule(new Map(), 0);
     const html = web.buildChannelPage(
@@ -177,6 +193,10 @@ describe("createWebModule", () => {
     expect(html).toContain("nearBottomThreshold = 48");
     expect(html).toContain("sessionStorage.getItem");
     expect(html).toContain("beforeunload");
+    expect(html).toContain("window.refreshMessages = refreshMessages");
+    expect(html).toContain("/messages/fragment");
+    expect(html).toContain("/updates");
+    expect(html).toContain("setInterval(function ()");
   });
 
   it("buildChannelMessagesPage desc: messages are reversed and show the reload button", async () => {
@@ -206,6 +226,8 @@ describe("createWebModule", () => {
     expect(html).toContain("再読込");
     expect(html).not.toContain("nearBottomThreshold = 48");
     expect(html).not.toContain("sessionStorage.getItem");
+    expect(html).toContain('onclick="void refreshMessages();"');
+    expect(html).not.toContain('onclick="location.reload();"');
   });
 
   it("buildChannelComposerPage includes the list link, reloads messages after submit, and blocks frame scrolling", () => {
@@ -227,6 +249,7 @@ describe("createWebModule", () => {
     expect(html).toContain('value="draft"');
     expect(html).toContain("送信失敗");
     expect(html).toContain("channel-messages-frame");
+    expect(html).toContain("refreshMessages");
     expect(html).toContain("location.reload()");
     expect(html).toContain('window.addEventListener("wheel"');
     expect(html).toContain('window.addEventListener("touchmove"');
@@ -407,7 +430,24 @@ describe("createWebModule", () => {
     expect(html).toContain('data-preview-title="Example title"');
     expect(html).toContain('id="url-preview-popup"');
     expect(html).toContain("pointerdown");
+    expect(html).toContain("window.initializeApricotPreview");
     expect(html).not.toContain("url-embed-container");
+  });
+
+  it("invokes the channel logs changed callback after persisting updates", async () => {
+    const onChannelLogsChanged = vi.fn();
+    const web = createWebModule(new Map(), 0, undefined, 200, onChannelLogsChanged);
+    const ctx = makeContext();
+
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "hello"],
+    });
+    await web.recordSelfMessage("#general", "apricot", "self");
+
+    expect(onChannelLogsChanged).toHaveBeenNthCalledWith(1, ["#general"]);
+    expect(onChannelLogsChanged).toHaveBeenNthCalledWith(2, ["#general"]);
   });
 
   it("renders text-only URL embeds for X previews", async () => {

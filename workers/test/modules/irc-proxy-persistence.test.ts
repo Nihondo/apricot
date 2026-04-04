@@ -20,7 +20,7 @@ vi.mock("../../src/templates/channel.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body><div class=\"shell\">{{FRAME_CONTENT}}</div></body></html>",
 }));
 vi.mock("../../src/templates/channel-messages.html", () => ({
-  default: "<html><head><style>{{CSS}}</style><script>{{AUTO_SCROLL_SCRIPT}}</script></head><body>{{MESSAGES}}{{RELOAD_BUTTON}}</body></html>",
+  default: "<html><head><style>{{CSS}}</style><script>{{AUTO_SCROLL_SCRIPT}}</script></head><body><div id=\"channel-messages-shell\">{{MESSAGES}}</div>{{RELOAD_BUTTON}}</body></html>",
 }));
 vi.mock("../../src/templates/channel-composer.html", () => ({
   default: "<html><head><style>{{CSS}}</style><script>{{ON_LOAD_SCRIPT}}</script></head><body>{{FLASH_MESSAGE}}<form action=\"{{ACTION_URL}}\" method=\"POST\">{{CHANNEL_LIST_LINK}}<input name=\"message\" value=\"{{MESSAGE_VALUE}}\"><button>送信</button></form></body></html>",
@@ -74,8 +74,11 @@ class FakeStorage {
 class FakeState {
   storage = new FakeStorage();
   initPromise: Promise<unknown> = Promise.resolve();
+  acceptedWebSockets: WebSocket[] = [];
 
-  acceptWebSocket(_ws: WebSocket): void {}
+  acceptWebSocket(ws: WebSocket): void {
+    this.acceptedWebSockets.push(ws);
+  }
 
   blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
     const promise = callback();
@@ -102,6 +105,7 @@ function makeEnv(overrides: Partial<Env> = {}): Env {
 
 describe("IrcProxyDO web log persistence", () => {
   beforeEach(() => {
+    vi.unstubAllGlobals();
     extractUrlMetadataMock.mockReset();
     resolveMessageEmbedMock.mockReset();
     resolveUrlEmbedMock.mockReset();
@@ -145,6 +149,29 @@ describe("IrcProxyDO web log persistence", () => {
     const html = await response.text();
 
     expect(html).toContain("restored line");
+  });
+
+  it("renders the web messages fragment route with a revision header", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: undefined })
+    );
+    await state.initPromise;
+
+    await (proxy as any).handleServerMessage({
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "fragment body"],
+    });
+
+    const response = await proxy.fetch(new Request("https://example.com/web/%23general/messages/fragment", {
+      headers: { "X-Proxy-Prefix": "/proxy/main" },
+    }));
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("X-Apricot-Channel-Revision")).toBe("1");
+    expect(await response.text()).toContain("fragment body");
   });
 
   it("renders the channel shell page with messages and composer iframes", async () => {
@@ -677,6 +704,47 @@ describe("IrcProxyDO web log persistence", () => {
     });
   });
 
+  it("requires the auth cookie for the web updates route and accepts an authenticated websocket", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+
+    const blockedResponse = await proxy.fetch(new Request("https://example.com/web/%23general/updates", {
+      headers: {
+        "Upgrade": "websocket",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+    }));
+    expect(blockedResponse.status).toBe(401);
+
+    const loginResponse = await proxy.fetch(new Request("https://example.com/web/login", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "password=secret",
+    }));
+    const cookieHeader = loginResponse.headers.get("Set-Cookie")?.split(";")[0] ?? "";
+    const acceptWebUpdatesSocket = vi
+      .spyOn(proxy as any, "acceptWebUpdatesSocket")
+      .mockReturnValue(new Response(null, { status: 200 }));
+
+    const allowedResponse = await proxy.fetch(new Request("https://example.com/web/%23general/updates", {
+      headers: {
+        "Cookie": cookieHeader,
+        "Upgrade": "websocket",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+    }));
+
+    expect(allowedResponse.status).toBe(200);
+    expect(acceptWebUpdatesSocket).toHaveBeenCalledWith("#general");
+  });
+
   it("renders the web messages and composer routes and records self messages on composer post", async () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
@@ -727,6 +795,54 @@ describe("IrcProxyDO web log persistence", () => {
       command: "PRIVMSG",
       params: ["#general", "hello"],
     });
+  });
+
+  it("broadcasts web update notifications only to subscribers of the changed channel", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: undefined })
+    );
+    await state.initPromise;
+
+    const send = vi.fn().mockResolvedValue(undefined);
+    (proxy as any).serverConn = {
+      connected: true,
+      send,
+    };
+    (proxy as any).nick = "apricot";
+
+    const generalSubscriber = { send: vi.fn() };
+    const randomSubscriber = { send: vi.fn() };
+    (proxy as any).webUpdateSubscribers.set(generalSubscriber, "#general");
+    (proxy as any).webUpdateSubscribers.set(randomSubscriber, "#random");
+
+    await (proxy as any).handleServerMessage({
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "server update"],
+    });
+
+    expect(generalSubscriber.send).toHaveBeenNthCalledWith(
+      1,
+      JSON.stringify({ type: "channel-updated", channel: "#general", revision: 1 })
+    );
+    expect(randomSubscriber.send).not.toHaveBeenCalled();
+
+    await proxy.fetch(new Request("https://example.com/web/%23general/composer", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "message=client-update",
+    }));
+
+    expect(generalSubscriber.send).toHaveBeenNthCalledWith(
+      2,
+      JSON.stringify({ type: "channel-updated", channel: "#general", revision: 2 })
+    );
+    expect(randomSubscriber.send).not.toHaveBeenCalled();
   });
 
   it("escapes only the server-bound composer message for non-utf8 encodings", async () => {

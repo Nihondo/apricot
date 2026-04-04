@@ -5,7 +5,7 @@
  * Features:
  *   - Channel list page
  *   - Per-channel message view with send form
- *   - Auto-refresh (30s)
+ *   - Fetch-based refresh with WebSocket notifications
  *   - Full theme customization with preset restore
  *   - Message history with timestamps
  *   - IRC event logging (JOIN/PART/QUIT/NICK/TOPIC etc.)
@@ -116,6 +116,7 @@ export const DEFAULT_WEB_UI_SETTINGS: WebUiSettings = {
 
 type MessageBufferStore = Map<string, StoredMessage[]>;
 type PersistLogsCallback = (logs: PersistedWebLogs) => Promise<void>;
+type ChannelLogsChangedCallback = (channels: string[]) => void;
 const WEB_UI_COLOR_FIELDS = [
   { name: "textColor", label: "文字色" },
   { name: "surfaceColor", label: "背景色1" },
@@ -337,44 +338,79 @@ function renderUrlEmbed(embed: ResolvedUrlEmbed, variant: "inline" | "popup"): s
 }
 
 function buildPreviewScript(): string {
-  return `var popup = document.getElementById("url-preview-popup");
-if (popup) {
-  var popupEmbed = popup.querySelector("[data-preview-popup-embed]");
-  var popupImage = popup.querySelector("[data-preview-popup-image]");
-  var popupSite = popup.querySelector("[data-preview-popup-site]");
-  var popupTitle = popup.querySelector("[data-preview-popup-title]");
-  var popupDescription = popup.querySelector("[data-preview-popup-description]");
+  return `window.__apricotPreviewState = window.__apricotPreviewState || {
+  initialized: false,
+  activeLink: null,
+  longPressTimer: 0,
+  longPressHandled: false
+};
+
+window.initializeApricotPreview = window.initializeApricotPreview || function initializeApricotPreview() {
+  var state = window.__apricotPreviewState;
   var hoverCapable = window.matchMedia && window.matchMedia("(hover: hover)").matches;
-  var longPressTimer = 0;
-  var longPressHandled = false;
-  var activeLink = null;
+
+  function getPopup() {
+    return document.getElementById("url-preview-popup");
+  }
+
+  function getPopupParts(popup) {
+    if (!popup) {
+      return null;
+    }
+    var popupEmbed = popup.querySelector("[data-preview-popup-embed]");
+    var popupImage = popup.querySelector("[data-preview-popup-image]");
+    var popupSite = popup.querySelector("[data-preview-popup-site]");
+    var popupTitle = popup.querySelector("[data-preview-popup-title]");
+    var popupDescription = popup.querySelector("[data-preview-popup-description]");
+    if (!popupEmbed || !popupImage || !popupSite || !popupTitle || !popupDescription) {
+      return null;
+    }
+    return {
+      popup: popup,
+      popupEmbed: popupEmbed,
+      popupImage: popupImage,
+      popupSite: popupSite,
+      popupTitle: popupTitle,
+      popupDescription: popupDescription
+    };
+  }
+
+  function findPreviewLink(target) {
+    return target instanceof Element ? target.closest("a[data-preview-kind]") : null;
+  }
 
   function fillPopup(link) {
-    if (!popupEmbed || !popupImage || !popupSite || !popupTitle || !popupDescription) {
-      return;
+    var popupParts = getPopupParts(getPopup());
+    if (!popupParts) {
+      return false;
     }
     var hasPreviewImage = Boolean(link.dataset.previewImageUrl);
-    popupImage.hidden = !hasPreviewImage;
+    popupParts.popupImage.hidden = !hasPreviewImage;
     if (hasPreviewImage) {
-      popupImage.setAttribute("src", link.dataset.previewImageUrl || "");
-      popupImage.setAttribute("alt", link.dataset.previewTitle || "URL preview");
-      popupImage.className = link.dataset.previewKind === "image"
+      popupParts.popupImage.setAttribute("src", link.dataset.previewImageUrl || "");
+      popupParts.popupImage.setAttribute("alt", link.dataset.previewTitle || "URL preview");
+      popupParts.popupImage.className = link.dataset.previewKind === "image"
         ? "url-embed__image url-embed__image--full"
         : "url-embed__image";
     } else {
-      popupImage.removeAttribute("src");
-      popupImage.setAttribute("alt", "URL preview");
-      popupImage.className = "url-embed__image";
+      popupParts.popupImage.removeAttribute("src");
+      popupParts.popupImage.setAttribute("alt", "URL preview");
+      popupParts.popupImage.className = "url-embed__image";
     }
-    popupSite.textContent = link.dataset.previewSiteName || "";
-    popupTitle.textContent = link.dataset.previewTitle || "";
-    popupDescription.textContent = link.dataset.previewDescription || "";
-    popupDescription.hidden = !link.dataset.previewDescription;
-    popupEmbed.classList.toggle("url-embed--text-only", !hasPreviewImage);
-    popup.classList.toggle("url-preview-popup--card", link.dataset.previewKind !== "image" || !hasPreviewImage);
+    popupParts.popupSite.textContent = link.dataset.previewSiteName || "";
+    popupParts.popupTitle.textContent = link.dataset.previewTitle || "";
+    popupParts.popupDescription.textContent = link.dataset.previewDescription || "";
+    popupParts.popupDescription.hidden = !link.dataset.previewDescription;
+    popupParts.popupEmbed.classList.toggle("url-embed--text-only", !hasPreviewImage);
+    popupParts.popup.classList.toggle("url-preview-popup--card", link.dataset.previewKind !== "image" || !hasPreviewImage);
+    return true;
   }
 
   function positionPopup(link) {
+    var popup = getPopup();
+    if (!popup) {
+      return;
+    }
     var rect = link.getBoundingClientRect();
     popup.style.left = "0px";
     popup.style.top = "0px";
@@ -390,89 +426,123 @@ if (popup) {
   }
 
   function showPopup(link) {
-    activeLink = link;
-    fillPopup(link);
+    if (!fillPopup(link)) {
+      return;
+    }
+    state.activeLink = link;
     positionPopup(link);
   }
 
   function hidePopup() {
-    activeLink = null;
-    popup.hidden = true;
+    state.activeLink = null;
+    var popup = getPopup();
+    if (popup) {
+      popup.hidden = true;
+    }
   }
 
   function clearLongPressTimer() {
-    if (longPressTimer) {
-      window.clearTimeout(longPressTimer);
-      longPressTimer = 0;
+    if (state.longPressTimer) {
+      window.clearTimeout(state.longPressTimer);
+      state.longPressTimer = 0;
     }
   }
 
-  var links = document.querySelectorAll("a[data-preview-kind]");
-  links.forEach(function (link) {
-    if (hoverCapable) {
-      link.addEventListener("mouseenter", function () {
-        showPopup(link);
-      });
-      link.addEventListener("mouseleave", function () {
-        if (activeLink === link) {
-          hidePopup();
-        }
-      });
+  if (state.initialized) {
+    return;
+  }
+  state.initialized = true;
+
+  document.addEventListener("mouseover", function (event) {
+    if (!hoverCapable) {
+      return;
     }
-
-    link.addEventListener("focus", function () {
-      showPopup(link);
-    });
-    link.addEventListener("blur", function () {
-      if (activeLink === link) {
-        hidePopup();
-      }
-    });
-
-    link.addEventListener("pointerdown", function (event) {
-      if (event.pointerType === "mouse") {
-        return;
-      }
-      longPressHandled = false;
-      clearLongPressTimer();
-      longPressTimer = window.setTimeout(function () {
-        longPressHandled = true;
-        showPopup(link);
-      }, 450);
-    });
-
-    link.addEventListener("pointerup", clearLongPressTimer);
-    link.addEventListener("pointercancel", clearLongPressTimer);
-    link.addEventListener("pointermove", clearLongPressTimer);
-    link.addEventListener("click", function (event) {
-      if (longPressHandled) {
-        event.preventDefault();
-        longPressHandled = false;
-      }
-    });
+    var link = findPreviewLink(event.target);
+    if (!link) {
+      return;
+    }
+    var relatedLink = findPreviewLink(event.relatedTarget);
+    if (relatedLink === link) {
+      return;
+    }
+    showPopup(link);
   });
 
-  document.addEventListener("pointerdown", function (event) {
-    if (!(event.target instanceof Element)) {
+  document.addEventListener("mouseout", function (event) {
+    if (!hoverCapable || !state.activeLink) {
       return;
     }
-    if (popup.contains(event.target)) {
+    var link = findPreviewLink(event.target);
+    if (!link || link !== state.activeLink) {
       return;
     }
-    if (event.target.closest("a[data-preview-kind]")) {
+    var relatedLink = findPreviewLink(event.relatedTarget);
+    if (relatedLink === link) {
       return;
     }
     hidePopup();
   });
 
+  document.addEventListener("focusin", function (event) {
+    var link = findPreviewLink(event.target);
+    if (link) {
+      showPopup(link);
+    }
+  });
+
+  document.addEventListener("focusout", function (event) {
+    var link = findPreviewLink(event.target);
+    if (link && link === state.activeLink) {
+      hidePopup();
+    }
+  });
+
+  document.addEventListener("pointerdown", function (event) {
+    var link = findPreviewLink(event.target);
+    if (!link) {
+      var popup = getPopup();
+      if (popup && event.target instanceof Element && popup.contains(event.target)) {
+        return;
+      }
+      hidePopup();
+      return;
+    }
+    if (event.pointerType === "mouse") {
+      return;
+    }
+    state.longPressHandled = false;
+    clearLongPressTimer();
+    state.longPressTimer = window.setTimeout(function () {
+      state.longPressHandled = true;
+      showPopup(link);
+    }, 450);
+  });
+
+  document.addEventListener("pointerup", clearLongPressTimer);
+  document.addEventListener("pointercancel", clearLongPressTimer);
+  document.addEventListener("pointermove", clearLongPressTimer);
+  document.addEventListener("click", function (event) {
+    var link = findPreviewLink(event.target);
+    if (!link) {
+      return;
+    }
+    if (state.longPressHandled) {
+      event.preventDefault();
+      state.longPressHandled = false;
+    }
+  });
+
   window.addEventListener("scroll", hidePopup, { passive: true });
   window.addEventListener("resize", hidePopup);
-}`;
+};
+
+window.initializeApricotPreview();`;
 }
 
 function buildConditionalAutoScrollScript(channel: string): string {
   const storageKey = JSON.stringify(`apricot:scroll-stick:${channel.toLowerCase()}`);
-  return `var nearBottomThreshold = 48;
+  return `window.apricotMessagesRuntime = window.apricotMessagesRuntime || {};
+var nearBottomThreshold = 48;
 var scrollStateStorageKey = ${storageKey};
 
 function getScrollRoot() {
@@ -512,9 +582,7 @@ function scheduleBottomStick() {
   window.setTimeout(scrollToBottom, 120);
 }
 
-var shouldStickToBottom = readShouldStickToBottom();
-if (shouldStickToBottom) {
-  scheduleBottomStick();
+function bindPendingImages() {
   document.querySelectorAll("img").forEach(function (image) {
     if (image.complete) {
       return;
@@ -523,9 +591,22 @@ if (shouldStickToBottom) {
   });
 }
 
+var shouldStickToBottom = readShouldStickToBottom();
+if (shouldStickToBottom) {
+  scheduleBottomStick();
+  bindPendingImages();
+}
+
 window.addEventListener("beforeunload", function () {
   writeShouldStickToBottom(isNearBottom());
-});`;
+});
+
+window.apricotMessagesRuntime.getScrollRoot = getScrollRoot;
+window.apricotMessagesRuntime.scrollToBottom = scrollToBottom;
+window.apricotMessagesRuntime.isNearBottom = isNearBottom;
+window.apricotMessagesRuntime.scheduleBottomStick = scheduleBottomStick;
+window.apricotMessagesRuntime.bindPendingImages = bindPendingImages;
+window.apricotMessagesRuntime.writeShouldStickToBottom = writeShouldStickToBottom;`;
 }
 
 function buildComposerOnLoadScript(shouldReloadMessages: boolean): string {
@@ -541,12 +622,202 @@ function buildComposerOnLoadScript(shouldReloadMessages: boolean): string {
     scriptLines.push(
       'var frame = window.parent && window.parent.document.getElementById("channel-messages-frame");',
       "if (frame && frame.contentWindow) {",
-      "  frame.contentWindow.location.reload();",
+      "  if (typeof frame.contentWindow.refreshMessages === \"function\") {",
+      "    void frame.contentWindow.refreshMessages();",
+      "  } else {",
+      "    frame.contentWindow.location.reload();",
+      "  }",
       "}"
     );
   }
 
   return scriptLines.join("\n");
+}
+
+function buildMessagesPageScript(
+  channel: string,
+  webUiSettings: WebUiSettings,
+  initialRevision = 0
+): string {
+  const serializedChannel = JSON.stringify(channel);
+  const shouldAutoStick = webUiSettings.displayOrder === "asc";
+  return `window.apricotMessagesRuntime = window.apricotMessagesRuntime || {};
+var apricotUpdateChannel = ${serializedChannel};
+var apricotShouldAutoStick = ${shouldAutoStick ? "true" : "false"};
+var apricotRefreshInFlight = false;
+var apricotRefreshQueued = false;
+var apricotLatestRevision = ${initialRevision};
+var apricotUpdateSocket = null;
+var apricotReconnectDelayMs = 1000;
+var apricotReconnectTimer = 0;
+var apricotMaxReconnectDelayMs = 30000;
+var apricotFallbackPollIntervalMs = 30000;
+var apricotIsUnloading = false;
+
+function getMessagesShell() {
+  return document.getElementById("channel-messages-shell");
+}
+
+function getFragmentUrl() {
+  return window.location.pathname.replace(/\\/messages\\/?$/, "/messages/fragment");
+}
+
+function getUpdatesUrl() {
+  var path = window.location.pathname.replace(/\\/messages\\/?$/, "/updates");
+  var protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
+  return protocol + "//" + window.location.host + path;
+}
+
+function updateKnownRevision(response) {
+  var revision = Number(response.headers.get("X-Apricot-Channel-Revision") || "0");
+  if (!Number.isFinite(revision) || revision <= 0) {
+    return;
+  }
+  apricotLatestRevision = Math.max(apricotLatestRevision, revision);
+}
+
+function applyMessagesMarkup(html) {
+  var shell = getMessagesShell();
+  if (!shell) {
+    return;
+  }
+  shell.innerHTML = html;
+  if (typeof window.initializeApricotPreview === "function") {
+    window.initializeApricotPreview();
+  }
+}
+
+async function refreshMessages() {
+  if (apricotRefreshInFlight) {
+    apricotRefreshQueued = true;
+    return;
+  }
+
+  apricotRefreshInFlight = true;
+  var runtime = window.apricotMessagesRuntime || {};
+  var shouldStickAfterRefresh = apricotShouldAutoStick
+    && typeof runtime.isNearBottom === "function"
+    && runtime.isNearBottom();
+
+  try {
+    var response = await fetch(getFragmentUrl(), {
+      credentials: "same-origin",
+      cache: "no-store",
+      headers: { "X-Requested-With": "apricot-fetch" }
+    });
+    if (!response.ok) {
+      throw new Error("Failed to refresh messages: " + response.status);
+    }
+    updateKnownRevision(response);
+    applyMessagesMarkup(await response.text());
+    if (shouldStickAfterRefresh && typeof runtime.scheduleBottomStick === "function") {
+      runtime.scheduleBottomStick();
+      if (typeof runtime.bindPendingImages === "function") {
+        runtime.bindPendingImages();
+      }
+    }
+  } catch (error) {
+    console.error(error);
+  } finally {
+    apricotRefreshInFlight = false;
+    if (apricotRefreshQueued) {
+      apricotRefreshQueued = false;
+      void refreshMessages();
+    }
+  }
+}
+
+function handleUpdateMessage(event) {
+  try {
+    var payload = JSON.parse(event.data);
+    if (payload.type !== "channel-updated" || payload.channel !== apricotUpdateChannel) {
+      return;
+    }
+    var revision = Number(payload.revision || "0");
+    if (Number.isFinite(revision) && revision > 0) {
+      if (revision <= apricotLatestRevision) {
+        return;
+      }
+      apricotLatestRevision = revision;
+    }
+    void refreshMessages();
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+function clearReconnectTimer() {
+  if (apricotReconnectTimer) {
+    window.clearTimeout(apricotReconnectTimer);
+    apricotReconnectTimer = 0;
+  }
+}
+
+function scheduleReconnect() {
+  if (apricotReconnectTimer || apricotIsUnloading) {
+    return;
+  }
+  apricotReconnectTimer = window.setTimeout(function () {
+    apricotReconnectTimer = 0;
+    connectUpdatesSocket();
+  }, apricotReconnectDelayMs);
+  apricotReconnectDelayMs = Math.min(apricotReconnectDelayMs * 2, apricotMaxReconnectDelayMs);
+}
+
+function connectUpdatesSocket() {
+  if (apricotIsUnloading) {
+    return;
+  }
+  if (apricotUpdateSocket && (
+    apricotUpdateSocket.readyState === WebSocket.OPEN ||
+    apricotUpdateSocket.readyState === WebSocket.CONNECTING
+  )) {
+    return;
+  }
+
+  try {
+    apricotUpdateSocket = new WebSocket(getUpdatesUrl());
+  } catch (error) {
+    console.error(error);
+    scheduleReconnect();
+    return;
+  }
+
+  apricotUpdateSocket.addEventListener("open", function () {
+    clearReconnectTimer();
+    apricotReconnectDelayMs = 1000;
+  });
+  apricotUpdateSocket.addEventListener("message", handleUpdateMessage);
+  apricotUpdateSocket.addEventListener("close", function () {
+    apricotUpdateSocket = null;
+    if (!apricotIsUnloading) {
+      scheduleReconnect();
+    }
+  });
+  apricotUpdateSocket.addEventListener("error", function () {
+    if (apricotUpdateSocket && apricotUpdateSocket.readyState <= WebSocket.OPEN) {
+      apricotUpdateSocket.close();
+    }
+  });
+}
+
+window.refreshMessages = refreshMessages;
+
+window.addEventListener("beforeunload", function () {
+  apricotIsUnloading = true;
+  clearReconnectTimer();
+  if (apricotUpdateSocket) {
+    apricotUpdateSocket.close();
+  }
+});
+
+window.setInterval(function () {
+  if (!apricotUpdateSocket || apricotUpdateSocket.readyState !== WebSocket.OPEN) {
+    void refreshMessages();
+  }
+}, apricotFallbackPollIntervalMs);
+
+connectUpdatesSocket();`;
 }
 
 /**
@@ -763,7 +1034,8 @@ export function createWebModule(
   channelStates: Map<string, ChannelMembership>,
   timezoneOffset = 0,
   persistLogs?: PersistLogsCallback,
-  maxLines = DEFAULT_maxLines
+  maxLines = DEFAULT_maxLines,
+  onChannelLogsChanged?: ChannelLogsChangedCallback
 ) {
   const store: MessageBufferStore = new Map();
 
@@ -793,6 +1065,7 @@ export function createWebModule(
   async function appendMessage(channel: string, msg: StoredMessage): Promise<void> {
     pushMessage(channel, msg);
     await persistSnapshot();
+    onChannelLogsChanged?.([channel]);
   }
 
   async function appendMessages(entries: Array<[string, StoredMessage]>): Promise<void> {
@@ -801,6 +1074,7 @@ export function createWebModule(
       pushMessage(channel, msg);
     }
     await persistSnapshot();
+    onChannelLogsChanged?.(Array.from(new Set(entries.map(([channel]) => channel))));
   }
 
   async function buildTextMessage(
@@ -945,6 +1219,39 @@ export function createWebModule(
     channel: string,
     topic: string,
     selfNick: string,
+    webUiSettings: WebUiSettings = DEFAULT_WEB_UI_SETTINGS,
+    channelRevision = 0
+  ): string {
+    const messagesHtml = buildChannelMessagesFragment(channel, selfNick, webUiSettings);
+    const reloadButton = webUiSettings.displayOrder === "desc"
+      ? '<button type="button" class="floating" onclick="void refreshMessages();">再読込</button>'
+      : "";
+    const scriptParts: string[] = [
+      buildMessagesPageScript(channel, webUiSettings, channelRevision),
+    ];
+    if (webUiSettings.displayOrder === "asc") {
+      scriptParts.push(buildConditionalAutoScrollScript(channel));
+    }
+    if (!webUiSettings.enableInlineUrlPreview) {
+      scriptParts.push(buildPreviewScript());
+    }
+
+    return CHANNEL_MESSAGES_TEMPLATE
+      .replace("{{CSS}}", buildChannelCss(webUiSettings))
+      .replace("{{CHANNEL}}", escapeHtml(channel))
+      .replace("{{TOPIC}}", escapeHtml(topic))
+      .replace("{{RELOAD_BUTTON}}", reloadButton)
+      .replace("{{AUTO_SCROLL_SCRIPT}}", scriptParts.join("\n"))
+      .replace("{{MESSAGES}}", messagesHtml);
+  }
+
+  /**
+   * Builds only the channel message list markup so Fetch refreshes can reuse
+   * the same server-side rendering as the initial page.
+   */
+  function buildChannelMessagesFragment(
+    channel: string,
+    selfNick: string,
     webUiSettings: WebUiSettings = DEFAULT_WEB_UI_SETTINGS
   ): string {
     const buf = getBuffer(channel);
@@ -970,25 +1277,8 @@ export function createWebModule(
       <span data-preview-popup-description class="url-embed__description"></span>
     </span>
   </div>
-</div>`;
-    const reloadButton = webUiSettings.displayOrder === "desc"
-      ? '<button type="button" class="floating" onclick="location.reload();">再読込</button>'
-      : "";
-    const scriptParts: string[] = [];
-    if (webUiSettings.displayOrder === "asc") {
-      scriptParts.push(buildConditionalAutoScrollScript(channel));
-    }
-    if (!webUiSettings.enableInlineUrlPreview) {
-      scriptParts.push(buildPreviewScript());
-    }
-
-    return CHANNEL_MESSAGES_TEMPLATE
-      .replace("{{CSS}}", buildChannelCss(webUiSettings))
-      .replace("{{CHANNEL}}", escapeHtml(channel))
-      .replace("{{TOPIC}}", escapeHtml(topic))
-      .replace("{{RELOAD_BUTTON}}", reloadButton)
-      .replace("{{AUTO_SCROLL_SCRIPT}}", scriptParts.join("\n"))
-      .replace("{{MESSAGES}}", lines + popupHtml);
+ </div>`;
+    return lines + popupHtml;
   }
 
   function buildChannelComposerPage(
@@ -1073,6 +1363,7 @@ export function createWebModule(
     module,
     buildChannelPage,
     buildChannelMessagesPage,
+    buildChannelMessagesFragment,
     buildChannelComposerPage,
     recordSelfMessage,
     getChannelTopic,
