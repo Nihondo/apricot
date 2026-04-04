@@ -7,7 +7,7 @@ vi.mock("../templates/channel.html", () => ({
   default: "<html><body>{{INPUT_BAR_POSITION}}{{CHANNEL_LIST_LINK}}{{RELOAD_BUTTON}}{{CONTENT_PADDING}}<h1>{{CHANNEL}}</h1><div>{{TOPIC}}</div><form action=\"{{ACTION_URL}}\"></form>{{MESSAGES}}</body></html>",
 }));
 vi.mock("../templates/channel-list.html", () => ({
-  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}<p>{{SERVER_NAME}} に {{NICK}} として参加</p><div>{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</div><span>サーバー: {{SERVER_NAME}}</span><span>ニック: {{NICK}}</span></body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}<p>{{SERVER_NAME}} に {{NICK}} として参加</p>{{FLASH_MESSAGE}}{{NICK_FORM}}<div>{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</div><span>サーバー: {{SERVER_NAME}}</span><span>NICK: {{NICK}}</span></body></html>",
 }));
 vi.mock("../templates/settings.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{ERROR}}この設定はチャンネル画面にのみ適用されます。{{PRESET_CONTROLS}}<form action=\"{{ACTION_URL}}\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\">{{COLOR_FIELDS}}<textarea>{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form>{{SETTINGS_SCRIPT}}</body></html>",
@@ -228,9 +228,31 @@ describe("createWebModule", () => {
 
     expect(html).toContain("irc.example.com に apricot として参加");
     expect(html).toContain("サーバー: irc.example.com");
-    expect(html).toContain("ニック: apricot");
+    expect(html).toContain("NICK: apricot");
+    expect(html).toContain('action="/proxy/main/web/nick"');
+    expect(html).toContain('name="nick"');
+    expect(html).toContain('value="apricot"');
+    expect(html).toContain("NICK変更");
+    expect(html).toContain("変更");
     expect(html).not.toContain("{{SERVER_NAME}}");
     expect(html).not.toContain("{{NICK}}");
+  });
+
+  it("builds the channel list page with a danger flash message", () => {
+    const html = buildChannelListPage(
+      [],
+      "apricot",
+      "irc.example.com",
+      false,
+      "/proxy/main/web",
+      false,
+      false,
+      "NICK変更に失敗しました: timeout waiting for server response",
+      "danger"
+    );
+
+    expect(html).toContain("admin-message--danger");
+    expect(html).toContain("NICK変更に失敗しました: timeout waiting for server response");
   });
 
   it("builds the settings page with current values and error text", () => {

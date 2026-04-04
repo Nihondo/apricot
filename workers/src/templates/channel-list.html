@@ -20,7 +20,7 @@
     <div class="admin-meta-row">
       <span class="admin-status-badge {{STATUS_CLASS}}">{{STATUS_ICON}} {{STATUS_TEXT}}</span>
       <span class="admin-meta-chip">サーバー: {{SERVER_NAME}}</span>
-      <span class="admin-meta-chip">ニック: {{NICK}}</span>
+      <span class="admin-meta-chip">NICK: {{NICK}}</span>
     </div>
   </header>
 
@@ -31,6 +31,8 @@
         <p class="admin-section-description">{{CHANNEL_COUNT}}</p>
       </div>
     </div>
+    {{FLASH_MESSAGE}}
+    {{NICK_FORM}}
     <div class="admin-list">
       {{CHANNEL_LINKS}}
     </div>

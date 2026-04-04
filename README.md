@@ -301,7 +301,7 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 |----------|:----:|-----------|------|
 | `IRC_HOST` | ✅ | ─ | IRC サーバーホスト名 |
 | `IRC_PORT` | ─ | `6667` | IRC サーバーポート（レンジ・複数指定可、例: `6660-6669` や `6660,6667,6697`） |
-| `IRC_NICK` | ─ | `apricot` | IRC ニックネーム |
+| `IRC_NICK` | ─ | `apricot` | IRC NICKネーム |
 | `IRC_USER` | ─ | `apricot` | IRC ユーザー名 |
 | `IRC_REALNAME` | ─ | `apricot IRC Proxy` | IRC リアルネーム |
 | `IRC_TLS` | ─ | `false` | TLS 使用（`true` / `false`） |

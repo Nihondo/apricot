@@ -9,7 +9,7 @@ vi.mock("../templates/channel.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{LOGOUT_FORM}}<div style=\"{{CONTENT_PADDING}}\">{{INPUT_BAR_POSITION}}{{RELOAD_BUTTON}}<h1>{{CHANNEL}}</h1><div>{{TOPIC}}</div>{{MESSAGES}}</div></body></html>",
 }));
 vi.mock("../templates/channel-list.html", () => ({
-  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{FLASH_MESSAGE}}{{NICK_FORM}}{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</body></html>",
 }));
 vi.mock("../templates/login.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{ERROR}}<form action=\"{{ACTION_URL}}\" method=\"POST\"><input name=\"password\"></form></body></html>",
@@ -788,6 +788,109 @@ describe("IrcProxyDO web log persistence", () => {
 
     expect(response.status).toBe(503);
     expect(await response.json()).toEqual({ error: "not connected to IRC server" });
+  });
+
+  it("changes nick from the web channel list and shows a success banner", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const send = vi.fn();
+    (proxy as any).serverConn = {
+      connected: true,
+      send,
+    };
+    (proxy as any).nick = "apricot";
+
+    const responsePromise = proxy.fetch(new Request("https://example.com/web/nick", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "nick=apricot_alt",
+    }));
+
+    while (!(proxy as any).pendingNickChange) {
+      await Promise.resolve();
+    }
+
+    await (proxy as any).handleServerMessage({
+      prefix: "apricot!user@host",
+      command: "NICK",
+      params: ["apricot_alt"],
+    });
+
+    const response = await responsePromise;
+    const html = await response.text();
+    expect(response.status).toBe(200);
+    expect(html).toContain("NICKを apricot_alt に変更しました");
+    expect(html).toContain('value="apricot_alt"');
+    expect(send).toHaveBeenCalledWith({
+      command: "NICK",
+      params: ["apricot_alt"],
+    });
+  });
+
+  it("shows a web nick-change error banner while disconnected", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const response = await proxy.fetch(new Request("https://example.com/web/nick", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "nick=apricot_alt",
+    }));
+    const html = await response.text();
+
+    expect(response.status).toBe(503);
+    expect(html).toContain("NICK変更に失敗しました: not connected to IRC server");
+    expect(html).toContain('value="apricot_alt"');
+  });
+
+  it("allows web nick changes on a public web UI without authentication", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: undefined })
+    );
+    await state.initPromise;
+
+    const send = vi.fn(async () => {
+      await (proxy as any).handleServerMessage({
+        prefix: "apricot!user@host",
+        command: "NICK",
+        params: ["apricot_public"],
+      });
+    });
+    (proxy as any).serverConn = {
+      connected: true,
+      send,
+    };
+    (proxy as any).nick = "apricot";
+
+    const response = await proxy.fetch(new Request("https://example.com/web/nick", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "nick=apricot_public",
+    }));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("NICKを apricot_public に変更しました");
   });
 
   it("validates nick-change API input", async () => {

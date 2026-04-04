@@ -338,7 +338,20 @@ export function buildChannelListPage(
   basePath: string,
   showLogout = false,
   showSettings = false,
+  flashMessage = "",
+  flashTone: "info" | "danger" = "info",
 ): string {
+  const flashHtml = flashMessage
+    ? `<div class="admin-message admin-message--${flashTone}"><span>${escapeHtml(flashMessage)}</span></div>`
+    : "";
+  const nickForm = `
+<form action="${basePath}/nick" method="POST" class="admin-inline-form">
+  <label class="admin-field">
+    <span class="admin-field__label">NICK変更</span>
+    <input type="text" name="nick" value="${escapeHtml(nick)}" class="admin-input" autocomplete="nickname">
+  </label>
+  <button type="submit" class="admin-button admin-button--subtle">変更</button>
+</form>`;
   const joinForm = `
 <form action="${basePath}/join" method="POST" class="admin-inline-form">
   <input type="text" name="channel" placeholder="#channel" class="admin-input" autocomplete="off">
@@ -381,6 +394,8 @@ export function buildChannelListPage(
     .split("{{SERVER_NAME}}").join(escapeHtml(serverName))
     .replace("{{CHANNEL_COUNT}}", escapeHtml(channelCountText))
     .replace("{{TOP_ACTIONS}}", actionParts.join(""))
+    .replace("{{FLASH_MESSAGE}}", flashHtml)
+    .replace("{{NICK_FORM}}", nickForm)
     .replace("{{CHANNEL_LINKS}}", chLinks);
 }
 

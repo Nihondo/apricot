@@ -293,17 +293,14 @@ export class IrcProxyDO implements DurableObject {
       });
     }
 
+    // POST /web/nick — change nick from web UI
+    if (request.method === "POST" && (url.pathname === "/web/nick" || url.pathname === "/web/nick/")) {
+      return this.handleWebNick(request, webBase);
+    }
+
     // GET /web — channel list
     if (url.pathname === "/web" || url.pathname === "/web/") {
-      const html = buildChannelListPage(
-        this.channels,
-        this.nick,
-        this.serverName,
-        this.serverConn?.connected ?? false,
-        webBase,
-        Boolean(this.config?.password),
-        this.canEditWebSettings()
-      );
+      const html = this.buildWebChannelListPage(webBase);
       return new Response(html, {
         headers: { "Content-Type": "text/html; charset=utf-8" },
       });
@@ -581,18 +578,67 @@ export class IrcProxyDO implements DurableObject {
     }
 
     const nick = body.nick?.trim();
-    if (!nick) {
-      return Response.json(
-        { error: "missing nick" },
-        { status: 400, headers: corsHeaders() }
+    const nickChangeResult = await this.requestNickChange(nick);
+    if (!nickChangeResult.ok) {
+      return Response.json({ error: nickChangeResult.error }, { status: nickChangeResult.status, headers: corsHeaders() });
+    }
+    const confirmedNick = nickChangeResult.nick;
+    return Response.json({ ok: true, nick: confirmedNick }, { headers: corsHeaders() });
+  }
+
+  private async handleWebNick(request: Request, webBase: string): Promise<Response> {
+    const formData = await request.formData();
+    const nick = (formData.get("nick") as string | null)?.trim() ?? "";
+    const nickChangeResult = await this.requestNickChange(nick);
+
+    if (!nickChangeResult.ok) {
+      return new Response(
+        this.buildWebChannelListPage(webBase, nick, `NICK変更に失敗しました: ${nickChangeResult.error}`, "danger"),
+        {
+          status: nickChangeResult.status,
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        }
       );
     }
 
+    return new Response(
+      this.buildWebChannelListPage(webBase, nickChangeResult.nick, `NICKを ${nickChangeResult.nick} に変更しました`, "info"),
+      {
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      }
+    );
+  }
+
+  private buildWebChannelListPage(
+    webBase: string,
+    nick = this.nick,
+    flashMessage = "",
+    flashTone: "info" | "danger" = "info"
+  ): string {
+    return buildChannelListPage(
+      this.channels,
+      nick,
+      this.serverName,
+      this.serverConn?.connected ?? false,
+      webBase,
+      Boolean(this.config?.password),
+      this.canEditWebSettings(),
+      flashMessage,
+      flashTone
+    );
+  }
+
+  private async requestNickChange(nick: string | undefined): Promise<
+    | { ok: true; nick: string }
+    | { ok: false; error: string; status: number }
+  > {
+    const requestedNick = nick?.trim() ?? "";
+    if (!requestedNick) {
+      return { ok: false, error: "missing nick", status: 400 };
+    }
+
     if (!this.serverConn?.connected) {
-      return Response.json(
-        { error: "not connected to IRC server" },
-        { status: 503, headers: corsHeaders() }
-      );
+      return { ok: false, error: "not connected to IRC server", status: 503 };
     }
 
     let pendingNickChange: NonNullable<IrcProxyDO["pendingNickChange"]>;
@@ -601,33 +647,31 @@ export class IrcProxyDO implements DurableObject {
         this.pendingNickChange = null;
         reject(new Error("timeout waiting for server response"));
       }, 5000);
-      pendingNickChange = { requestedNick: nick, resolve, reject, timer };
+      pendingNickChange = { requestedNick, resolve, reject, timer };
       this.pendingNickChange = pendingNickChange;
     });
 
     try {
       await this.serverConn.send({
         command: "NICK",
-        params: [nick],
+        params: [requestedNick],
       });
     } catch (err) {
       if (this.pendingNickChange === pendingNickChange!) {
         clearTimeout(pendingNickChange!.timer);
         this.pendingNickChange = null;
       }
-      const msg = err instanceof Error ? err.message : String(err);
-      return Response.json({ error: msg }, { status: 502, headers: corsHeaders() });
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: errorMessage, status: 502 };
     }
 
-    let confirmedNick: string;
     try {
-      confirmedNick = await pendingNickChangePromise;
+      const confirmedNick = await pendingNickChangePromise;
+      return { ok: true, nick: confirmedNick };
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      return Response.json({ error: msg }, { status: 503, headers: corsHeaders() });
+      const errorMessage = err instanceof Error ? err.message : String(err);
+      return { ok: false, error: errorMessage, status: 503 };
     }
-
-    return Response.json({ ok: true, nick: confirmedNick }, { headers: corsHeaders() });
   }
 
   private resolvePendingNickChange(nick: string): void {
