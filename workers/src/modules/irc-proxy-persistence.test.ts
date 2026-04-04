@@ -700,6 +700,94 @@ describe("IrcProxyDO web log persistence", () => {
     });
   });
 
+  it("escapes only the server-bound composer message for non-utf8 encodings", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: undefined, IRC_ENCODING: "iso-2022-jp" })
+    );
+    await state.initPromise;
+
+    const send = vi.fn().mockResolvedValue(undefined);
+    (proxy as any).serverConn = {
+      connected: true,
+      send,
+    };
+    (proxy as any).nick = "apricot";
+
+    const postResponse = await proxy.fetch(new Request("https://example.com/web/%23general/composer", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: new URLSearchParams({ message: "hello😀" }).toString(),
+    }));
+    const postHtml = await postResponse.text();
+    expect(postResponse.status).toBe(200);
+    expect(postHtml).toContain("channel-messages-frame");
+
+    const messagesResponse = await proxy.fetch(new Request("https://example.com/web/%23general/messages", {
+      headers: { "X-Proxy-Prefix": "/proxy/main" },
+    }));
+    const messagesHtml = await messagesResponse.text();
+    expect(messagesResponse.status).toBe(200);
+    expect(messagesHtml).toContain("hello😀");
+
+    const logs = state.storage.read<PersistedWebLogs>(webLogsStorageKey);
+    expect(logs?.["#general"]?.at(-1)).toMatchObject({
+      type: "self",
+      nick: "apricot",
+      text: "hello😀",
+    });
+    expect(send).toHaveBeenCalledWith({
+      command: "PRIVMSG",
+      params: ["#general", "hello&#x1F600;"],
+    });
+  });
+
+  it("returns the original API message while escaping only the server-bound message", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ IRC_ENCODING: "iso-2022-jp" })
+    );
+    await state.initPromise;
+
+    const send = vi.fn().mockResolvedValue(undefined);
+    (proxy as any).serverConn = {
+      connected: true,
+      send,
+    };
+    (proxy as any).nick = "apricot";
+
+    const response = await proxy.fetch(new Request("https://example.com/api/post", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ channel: "#general", message: "hello😀" }),
+    }));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      ok: true,
+      channel: "#general",
+      message: "hello😀",
+    });
+    expect(send).toHaveBeenCalledWith({
+      command: "PRIVMSG",
+      params: ["#general", "hello&#x1F600;"],
+    });
+
+    const logs = state.storage.read<PersistedWebLogs>(webLogsStorageKey);
+    expect(logs?.["#general"]?.at(-1)).toMatchObject({
+      type: "self",
+      nick: "apricot",
+      text: "hello😀",
+    });
+  });
+
   it("clears the cookie on logout", async () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(

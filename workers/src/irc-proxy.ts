@@ -25,6 +25,7 @@ import {
 } from "./modules/web";
 import { extractUrlMetadata } from "./modules/url-metadata";
 import { buildProxyConfigFromEnv, type ProxyConfig } from "./proxy-config";
+import { escapeUnsupportedIrcText } from "./irc-text-escape";
 import LOGIN_TEMPLATE from "./templates/login.html";
 
 const reconnectDelayMs = 5_000;
@@ -797,13 +798,15 @@ export class IrcProxyDO implements DurableObject {
       return { ok: false, error: "missing message", status: 400 };
     }
 
+    const serverMessage = escapeUnsupportedIrcText(trimmedMessage, this.config?.server.encoding);
+
     if (!this.serverConn?.connected) {
       return { ok: false, error: "not connected to IRC server", status: 503 };
     }
 
     await this.serverConn.send({
       command: "PRIVMSG",
-      params: [targetChannel, trimmedMessage],
+      params: [targetChannel, serverMessage],
     });
 
     await this.web.recordSelfMessage(targetChannel, this.nick, trimmedMessage);
