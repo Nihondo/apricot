@@ -731,6 +731,40 @@ describe("IrcProxyDO web log persistence", () => {
     });
   });
 
+  it("allows IRC formatting control codes when posting from the web composer route", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+
+    const send = vi.fn();
+    (proxy as any).serverConn = {
+      connected: true,
+      send,
+    };
+    (proxy as any).nick = "apricot";
+
+    const cookieHeader = await loginWeb(proxy);
+    const formattedMessage = "\u0002bold\u0002 \u000304green\u000f";
+    const response = await proxy.fetch(new Request("https://example.com/web/%23general/composer", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: new URLSearchParams({ message: formattedMessage }).toString(),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(send).toHaveBeenCalledWith({
+      command: "PRIVMSG",
+      params: ["#general", formattedMessage],
+    });
+  });
+
   it("requires the auth cookie for the web updates route and accepts an authenticated websocket", async () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(

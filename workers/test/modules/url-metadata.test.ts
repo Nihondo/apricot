@@ -201,7 +201,14 @@ describe("url metadata resolver", () => {
     expect(isAllowedPreviewUrl("http://127.0.0.1/test")).toBe(false);
     expect(isAllowedPreviewUrl("http://169.254.1.1/test")).toBe(false);
     expect(isAllowedPreviewUrl("http://10.0.0.1/test")).toBe(false);
+    expect(isAllowedPreviewUrl("http://[::1]/test")).toBe(false);
+    expect(isAllowedPreviewUrl("http://[fe80::1]/test")).toBe(false);
+    expect(isAllowedPreviewUrl("http://[fd00::1]/test")).toBe(false);
     expect(isAllowedPreviewUrl("http://example.com:8080/test")).toBe(false);
+  });
+
+  it("allows public IPv6 preview URLs", () => {
+    expect(isAllowedPreviewUrl("https://[2001:4860:4860::8888]/test")).toBe(true);
   });
 
   it("does not fetch blocked preview URLs from message text", async () => {

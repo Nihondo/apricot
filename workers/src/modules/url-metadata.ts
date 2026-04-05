@@ -82,7 +82,7 @@ export function isAllowedPreviewUrl(url: string): boolean {
     }
   }
 
-  const hostname = parsed.hostname.toLowerCase();
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, "").toLowerCase();
   if (!hostname || hostname === "localhost" || hostname.endsWith(".local") || hostname.endsWith(".internal")) {
     return false;
   }

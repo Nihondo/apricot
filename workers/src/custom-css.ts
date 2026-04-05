@@ -117,7 +117,7 @@ export function sanitizeCustomCss(input: string): SanitizedCssResult {
       .map((entry) => entry.trim())
       .filter(Boolean);
     if (declarations.length === 0) {
-      return { ok: false, error: "Extra CSS の宣言が空です" };
+      continue;
     }
 
     const normalizedDeclarations: string[] = [];

@@ -51,12 +51,14 @@ export function validateMessageInput(value: string | null | undefined): Validati
   if (!normalized) {
     return { ok: false, error: "missing message" };
   }
-  if (hasForbiddenControlChars(normalized)) {
+  if (hasForbiddenLineBreaks(normalized)) {
     return { ok: false, error: "invalid message" };
   }
   return { ok: true, value: normalized };
 }
 
+// PASS parameters are compared as provided by the IRC client, including leading
+// or trailing spaces when present.
 export function validatePasswordInput(value: string | null | undefined): ValidationResult {
   const normalized = typeof value === "string" ? value : "";
   if (hasForbiddenControlChars(normalized)) {
