@@ -61,6 +61,16 @@ type WebChannelUpdateMessage = {
   channel: string;
   revision: number;
 };
+type WebHeartbeatPingMessage = {
+  type: "ping";
+};
+type WebHeartbeatPongMessage = {
+  type: "pong";
+};
+type WebUpdateSocketMessage =
+  | WebChannelUpdateMessage
+  | WebHeartbeatPingMessage
+  | WebHeartbeatPongMessage;
 const webUiColorFieldNames: Array<keyof WebUiColorSettings> = [
   "textColor",
   "surfaceColor",
@@ -505,6 +515,16 @@ export class IrcProxyDO implements DurableObject {
     message: string | ArrayBuffer
   ): Promise<void> {
     if (this.webUpdateSubscribers.has(ws)) {
+      if (typeof message !== "string") {
+        return;
+      }
+      try {
+        const payload = JSON.parse(message) as Partial<WebUpdateSocketMessage>;
+        if (payload.type === "ping") {
+          const pongMessage: WebHeartbeatPongMessage = { type: "pong" };
+          ws.send(JSON.stringify(pongMessage));
+        }
+      } catch {}
       return;
     }
 

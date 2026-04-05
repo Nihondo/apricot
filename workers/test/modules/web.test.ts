@@ -205,7 +205,15 @@ describe("createWebModule", () => {
     expect(html).toContain("window.refreshMessages = refreshMessages");
     expect(html).toContain("/messages/fragment");
     expect(html).toContain("/updates");
-    expect(html).toContain("setInterval(function ()");
+    expect(html).toContain("var apricotHeartbeatIntervalMs = 30000");
+    expect(html).toContain("var apricotMissedHeartbeatLimit = 2");
+    expect(html).toContain("function markSocketHealthy()");
+    expect(html).toContain("function handleHeartbeatFailure()");
+    expect(html).toContain('if (payloadType === "pong") {');
+    expect(html).toContain("apricotHasIssuedDegradedRefresh = true;");
+    expect(html).toContain("function startFallbackRefreshPoll()");
+    expect(html).toContain("Heartbeat 導入により現状は未使用。将来の運用切替用に保持している。");
+    expect(html).not.toContain("startFallbackRefreshPoll();");
     expect(html).toContain("var apricotNormalizedUpdateChannel = apricotUpdateChannel.toLowerCase()");
     expect(html).toContain('var payloadChannel = typeof payload.channel === "string" ? payload.channel.toLowerCase() : ""');
   });

@@ -1111,6 +1111,46 @@ describe("IrcProxyDO web log persistence", () => {
     expect(randomSubscriber.send).not.toHaveBeenCalled();
   });
 
+  it("responds to heartbeat ping on web update sockets without invoking client registration", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+
+    const updateSocket = { send: vi.fn() } as unknown as WebSocket;
+    const otherUpdateSocket = { send: vi.fn() } as unknown as WebSocket;
+    (proxy as any).webUpdateSubscribers.set(updateSocket, "#general");
+    (proxy as any).webUpdateSubscribers.set(otherUpdateSocket, "#general");
+    const handleClientRegistration = vi.spyOn(proxy as any, "handleClientRegistration");
+
+    await proxy.webSocketMessage(updateSocket, JSON.stringify({ type: "ping" }));
+
+    expect(updateSocket.send).toHaveBeenCalledWith(JSON.stringify({ type: "pong" }));
+    expect(otherUpdateSocket.send).not.toHaveBeenCalled();
+    expect(handleClientRegistration).not.toHaveBeenCalled();
+  });
+
+  it("removes only the closed web update subscriber", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+
+    const firstUpdateSocket = { send: vi.fn() } as unknown as WebSocket;
+    const secondUpdateSocket = { send: vi.fn() } as unknown as WebSocket;
+    (proxy as any).webUpdateSubscribers.set(firstUpdateSocket, "#general");
+    (proxy as any).webUpdateSubscribers.set(secondUpdateSocket, "#random");
+
+    await proxy.webSocketClose(firstUpdateSocket, 1001, "closing", true);
+
+    expect((proxy as any).webUpdateSubscribers.has(firstUpdateSocket)).toBe(false);
+    expect((proxy as any).webUpdateSubscribers.get(secondUpdateSocket)).toBe("#random");
+  });
+
   it("escapes only the server-bound composer message for non-utf8 encodings", async () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(

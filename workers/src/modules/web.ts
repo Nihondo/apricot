@@ -1061,8 +1061,15 @@ var apricotLatestRevision = ${initialRevision};
 var apricotUpdateSocket = null;
 var apricotReconnectDelayMs = 1000;
 var apricotReconnectTimer = 0;
+var apricotHeartbeatTimer = 0;
 var apricotMaxReconnectDelayMs = 30000;
 var apricotFallbackPollIntervalMs = 30000;
+var apricotHeartbeatIntervalMs = 30000;
+var apricotMissedHeartbeatLimit = 2;
+var apricotMissedHeartbeatCount = 0;
+var apricotHasIssuedDegradedRefresh = false;
+var apricotLastSocketActivityAt = 0;
+var apricotLastHeartbeatSentAt = 0;
 var apricotIsUnloading = false;
 
 function getMessagesShell() {
@@ -1096,6 +1103,19 @@ function applyMessagesMarkup(html) {
   if (typeof window.initializeApricotPreview === "function") {
     window.initializeApricotPreview();
   }
+}
+
+function resetHeartbeatState() {
+  apricotMissedHeartbeatCount = 0;
+  apricotHasIssuedDegradedRefresh = false;
+  apricotLastSocketActivityAt = 0;
+  apricotLastHeartbeatSentAt = 0;
+}
+
+function markSocketHealthy() {
+  apricotMissedHeartbeatCount = 0;
+  apricotHasIssuedDegradedRefresh = false;
+  apricotLastSocketActivityAt = Date.now();
 }
 
 async function refreshMessages() {
@@ -1146,10 +1166,16 @@ async function refreshMessages() {
 function handleUpdateMessage(event) {
   try {
     var payload = JSON.parse(event.data);
-    var payloadChannel = typeof payload.channel === "string" ? payload.channel.toLowerCase() : "";
-    if (payload.type !== "channel-updated" || payloadChannel !== apricotNormalizedUpdateChannel) {
+    var payloadType = typeof payload.type === "string" ? payload.type : "";
+    if (payloadType === "pong") {
+      markSocketHealthy();
       return;
     }
+    var payloadChannel = typeof payload.channel === "string" ? payload.channel.toLowerCase() : "";
+    if (payloadType !== "channel-updated" || payloadChannel !== apricotNormalizedUpdateChannel) {
+      return;
+    }
+    markSocketHealthy();
     var revision = Number(payload.revision || "0");
     if (Number.isFinite(revision) && revision > 0) {
       if (revision <= apricotLatestRevision) {
@@ -1168,6 +1194,71 @@ function clearReconnectTimer() {
     window.clearTimeout(apricotReconnectTimer);
     apricotReconnectTimer = 0;
   }
+}
+
+function clearHeartbeatTimer() {
+  if (apricotHeartbeatTimer) {
+    window.clearInterval(apricotHeartbeatTimer);
+    apricotHeartbeatTimer = 0;
+  }
+}
+
+function closeUpdateSocket() {
+  if (apricotUpdateSocket && apricotUpdateSocket.readyState <= WebSocket.OPEN) {
+    apricotUpdateSocket.close();
+  }
+}
+
+function handleHeartbeatFailure() {
+  apricotMissedHeartbeatCount += 1;
+  if (apricotMissedHeartbeatCount < apricotMissedHeartbeatLimit) {
+    return;
+  }
+  if (!apricotHasIssuedDegradedRefresh) {
+    apricotHasIssuedDegradedRefresh = true;
+    void refreshMessages();
+    return;
+  }
+  closeUpdateSocket();
+}
+
+function sendHeartbeat() {
+  if (!apricotUpdateSocket || apricotUpdateSocket.readyState !== WebSocket.OPEN) {
+    return;
+  }
+  if (
+    apricotLastHeartbeatSentAt > 0 &&
+    apricotLastSocketActivityAt < apricotLastHeartbeatSentAt
+  ) {
+    handleHeartbeatFailure();
+    if (!apricotUpdateSocket || apricotUpdateSocket.readyState !== WebSocket.OPEN) {
+      return;
+    }
+  }
+
+  apricotLastHeartbeatSentAt = Date.now();
+  try {
+    apricotUpdateSocket.send(JSON.stringify({ type: "ping" }));
+  } catch (error) {
+    console.error(error);
+    closeUpdateSocket();
+  }
+}
+
+function startHeartbeatTimer() {
+  clearHeartbeatTimer();
+  apricotHeartbeatTimer = window.setInterval(function () {
+    sendHeartbeat();
+  }, apricotHeartbeatIntervalMs);
+}
+
+function startFallbackRefreshPoll() {
+  // Heartbeat 導入により現状は未使用。将来の運用切替用に保持している。
+  return window.setInterval(function () {
+    if (!apricotUpdateSocket || apricotUpdateSocket.readyState !== WebSocket.OPEN) {
+      void refreshMessages();
+    }
+  }, apricotFallbackPollIntervalMs);
 }
 
 function scheduleReconnect() {
@@ -1203,18 +1294,21 @@ function connectUpdatesSocket() {
   apricotUpdateSocket.addEventListener("open", function () {
     clearReconnectTimer();
     apricotReconnectDelayMs = 1000;
+    resetHeartbeatState();
+    markSocketHealthy();
+    startHeartbeatTimer();
   });
   apricotUpdateSocket.addEventListener("message", handleUpdateMessage);
   apricotUpdateSocket.addEventListener("close", function () {
+    clearHeartbeatTimer();
+    resetHeartbeatState();
     apricotUpdateSocket = null;
     if (!apricotIsUnloading) {
       scheduleReconnect();
     }
   });
   apricotUpdateSocket.addEventListener("error", function () {
-    if (apricotUpdateSocket && apricotUpdateSocket.readyState <= WebSocket.OPEN) {
-      apricotUpdateSocket.close();
-    }
+    closeUpdateSocket();
   });
 }
 
@@ -1223,16 +1317,9 @@ window.refreshMessages = refreshMessages;
 window.addEventListener("beforeunload", function () {
   apricotIsUnloading = true;
   clearReconnectTimer();
-  if (apricotUpdateSocket) {
-    apricotUpdateSocket.close();
-  }
+  clearHeartbeatTimer();
+  closeUpdateSocket();
 });
-
-window.setInterval(function () {
-  if (!apricotUpdateSocket || apricotUpdateSocket.readyState !== WebSocket.OPEN) {
-    void refreshMessages();
-  }
-}, apricotFallbackPollIntervalMs);
 
 connectUpdatesSocket();`;
 }
