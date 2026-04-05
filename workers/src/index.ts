@@ -1,3 +1,5 @@
+import FAVICON_ICO from "../favicon.ico";
+
 /**
  * Cloudflare Worker entry point for apricot IRC Proxy.
  *
@@ -19,6 +21,7 @@
  *   POST /proxy/:id/api/nick — Change IRC nick (Bearer auth)
  *   POST /proxy/:id/api/disconnect — Disconnect from IRC server (Bearer auth)
  *   GET  /proxy/:id/api/logs/:channel — Retrieve buffered messages for a channel (Bearer auth)
+ *   GET  /favicon.ico            — Site favicon
  *   GET  /                   — Health check
  */
 
@@ -37,6 +40,15 @@ export default {
         name: "apricot-irc-proxy",
         version: "0.1.0",
         status: "ok",
+      });
+    }
+
+    if (path === "/favicon.ico") {
+      return new Response(FAVICON_ICO, {
+        headers: {
+          "Content-Type": "image/x-icon",
+          "Cache-Control": "public, max-age=86400",
+        },
       });
     }
 

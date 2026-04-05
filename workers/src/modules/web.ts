@@ -179,6 +179,10 @@ function renderAdminLogoutForm(basePath: string): string {
   return `<form action="${basePath}/logout" method="POST"><button type="submit" class="admin-button admin-button--subtle">ログアウト</button></form>`;
 }
 
+function renderAdminBrand(logoUrl: string): string {
+  return `<div class="admin-brand"><img src="${escapeHtml(logoUrl)}" alt="apricot" class="admin-brand__image" width="315" height="103"></div>`;
+}
+
 /**
  * Returns a cloned settings object with missing fields filled from defaults.
  */
@@ -941,6 +945,7 @@ export function buildChannelListPage(
   flashTone: "info" | "danger" = "info",
 ): string {
   const flashHtml = renderFlashMessage(flashMessage, flashTone);
+  const adminBrandHtml = renderAdminBrand(`${basePath}/assets/apricot-logo.png`);
   const nickForm = `
 <form action="${basePath}/nick" method="POST" class="admin-inline-form">
   <label class="admin-field">
@@ -983,6 +988,7 @@ export function buildChannelListPage(
 
   return CHANNEL_LIST_TEMPLATE
     .replace("{{CSS}}", buildAdminCss())
+    .replace("{{ADMIN_BRAND}}", adminBrandHtml)
     .replace("{{STATUS_CLASS}}", statusClass)
     .replace("{{STATUS_TEXT}}", statusText)
     .replace("{{STATUS_ICON}}", connected ? "&#x1f7e2;" : "&#x1f534;")
@@ -1006,6 +1012,7 @@ export function buildSettingsPage(
   errorMessage = ""
 ): string {
   const isAscendingOrder = webUiSettings.displayOrder === "asc";
+  const adminBrandHtml = renderAdminBrand(`${basePath}/assets/apricot-logo.png`);
   const topActionsHtml = `<a href="${basePath}/" class="admin-button admin-button--subtle">チャンネル一覧へ戻る</a>${renderAdminLogoutForm(basePath)}`;
   const errorHtml = renderSettingsError(errorMessage);
   const colorFieldsHtml = renderThemeColorFields(webUiSettings);
@@ -1014,6 +1021,7 @@ export function buildSettingsPage(
 
   return SETTINGS_TEMPLATE
     .replace("{{CSS}}", buildAdminCss())
+    .replace("{{ADMIN_BRAND}}", adminBrandHtml)
     .replace("{{NICK}}", escapeHtml(nick))
     .replace("{{SERVER_NAME}}", escapeHtml(serverName))
     .replace("{{TOP_ACTIONS}}", topActionsHtml)

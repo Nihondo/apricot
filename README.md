@@ -1,5 +1,7 @@
 # apricot IRC Proxy
 
+![](./images/apricot_logo.png)
+
 IRC サーバーへの永続接続を維持し、**ブラウザ・IRC クライアント・REST API**の 3 経路からチャットに参加できる IRC プロキシです。
 Cloudflare Workers + Durable Objects で動作します。
 

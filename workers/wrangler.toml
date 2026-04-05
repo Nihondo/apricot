@@ -16,10 +16,16 @@ KEEPALIVE_INTERVAL = "60"
 TIMEZONE_OFFSET = "9"
 WEB_LOG_MAX_LINES = "200"
 IRC_ENCODING = "iso-2022-jp"
+ENABLE_REMOTE_URL_PREVIEW = "true"
 
 [[rules]]
 type = "Text"
 globs = ["**/*.html", "**/*.css"]
+fallthrough = false
+
+[[rules]]
+type = "Data"
+globs = ["**/*.png", "**/*.ico"]
 fallthrough = false
 
 [durable_objects]

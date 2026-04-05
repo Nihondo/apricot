@@ -39,6 +39,7 @@ import {
 import { buildProxyConfigFromEnv, type ProxyConfig } from "./proxy-config";
 import { escapeUnsupportedIrcText } from "./irc-text-escape";
 import { sanitizeCustomCss } from "./custom-css";
+import APRICOT_LOGO_PNG from "./assets/apricot_logo.png";
 import LOGIN_TEMPLATE from "./templates/login.html";
 
 const reconnectDelayMs = 5_000;
@@ -152,6 +153,7 @@ export class IrcProxyDO implements DurableObject {
     const isWebLogoutPath = url.pathname === "/web/logout" || url.pathname === "/web/logout/";
     const isWebSettingsPath = url.pathname === "/web/settings" || url.pathname === "/web/settings/";
     const isWebThemePath = url.pathname === "/web/theme.css" || url.pathname === "/web/theme.css/";
+    const isWebLogoPath = url.pathname === "/web/assets/apricot-logo.png";
     const isWebRequest = url.pathname === "/web"
       || url.pathname === "/web/"
       || url.pathname === "/ws"
@@ -160,8 +162,8 @@ export class IrcProxyDO implements DurableObject {
       url.pathname === "/web" ||
       url.pathname === "/web/" ||
       /^\/web\/.+$/.test(url.pathname)
-    ) && !isWebLoginPath && !isWebLogoutPath && !isWebThemePath;
-    const isProtectedWebAssetRequest = Boolean(webUpdatesMatch) || isWebThemePath;
+    ) && !isWebLoginPath && !isWebLogoutPath && !isWebThemePath && !isWebLogoPath;
+    const isProtectedWebAssetRequest = Boolean(webUpdatesMatch) || isWebThemePath || isWebLogoPath;
 
     if (isWebRequest && !this.config?.password) {
       return new Response("CLIENT_PASSWORD not configured", { status: 503 });
@@ -276,6 +278,15 @@ export class IrcProxyDO implements DurableObject {
 
     if (request.method === "GET" && isWebThemePath) {
       return this.renderWebThemeCss();
+    }
+
+    if (request.method === "GET" && isWebLogoPath) {
+      return new Response(APRICOT_LOGO_PNG, {
+        headers: {
+          "Content-Type": "image/png",
+          "Cache-Control": "private, max-age=86400",
+        },
+      });
     }
 
     // POST /web/login — validate password and set session cookie

@@ -52,6 +52,18 @@
   margin-bottom: 16px;
 }
 
+.admin-brand {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 16px;
+}
+
+.admin-brand__image {
+  display: block;
+  width: min(calc(629px / 2), 100%);
+  height: auto;
+}
+
 .admin-page-header__eyebrow {
   color: var(--ds-text-subtle);
   font-size: 12px;
