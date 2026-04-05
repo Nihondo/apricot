@@ -397,8 +397,8 @@
 
 .theme-preview__frame {
   width: 100%;
-  min-height: 280px;
-  height: 280px;
+  min-height: 180px;
+  height: 180px;
   border: 1px solid var(--ds-border);
   border-radius: 14px;
   background: #ffffff;
@@ -436,7 +436,7 @@
   }
 
   .theme-preview__frame {
-    min-height: 240px;
-    height: 240px;
+    min-height: 160px;
+    height: 160px;
   }
 }
