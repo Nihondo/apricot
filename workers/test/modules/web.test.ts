@@ -20,7 +20,7 @@ vi.mock("../../src/templates/channel-composer.html", () => ({
   default: "<html><head><style>{{CSS}}</style>{{THEME_CSS_LINK}}<script>{{ON_LOAD_SCRIPT}}</script></head><body>{{FLASH_MESSAGE}}<form action=\"{{ACTION_URL}}\">{{CHANNEL_LIST_LINK}}<input name=\"message\" value=\"{{MESSAGE_VALUE}}\"><button>送信</button></form></body></html>",
 }));
 vi.mock("../../src/templates/channel-list.html", () => ({
-  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}<p>{{SERVER_NAME}} に {{NICK}} として参加</p>{{FLASH_MESSAGE}}{{NICK_FORM}}<div>{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</div><span>サーバー: {{SERVER_NAME}}</span><span>NICK: {{NICK}}</span></body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}<p>{{SERVER_NAME}} に {{NICK}} として参加</p>{{FLASH_MESSAGE}}{{NICK_FORM}}<div>{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</div>{{CONFIG_PANEL}}<span>サーバー: {{SERVER_NAME}}</span><span>NICK: {{NICK}}</span></body></html>",
 }));
 vi.mock("../../src/templates/settings.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{ERROR}}この設定はチャンネル画面にのみ適用されます。<form action=\"{{ACTION_URL}}\">{{COLOR_PREVIEW}}<input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\">{{PRESET_CONTROLS}}{{COLOR_FIELDS}}<input type=\"checkbox\" name=\"enableInlineUrlPreview\" {{ENABLE_INLINE_URL_PREVIEW_CHECKED}}><textarea name=\"highlightKeywords\">{{HIGHLIGHT_KEYWORDS}}</textarea><textarea name=\"dimKeywords\">{{DIM_KEYWORDS}}</textarea><textarea>{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form>{{SETTINGS_SCRIPT}}</body></html>",
@@ -339,12 +339,38 @@ describe("createWebModule", () => {
     expect(html).toContain("サーバー: irc.example.com");
     expect(html).toContain("NICK: apricot");
     expect(html).toContain('action="/proxy/main/web/nick"');
+    expect(html).toContain("現在のNICK");
     expect(html).toContain('name="nick"');
     expect(html).toContain('value="apricot"');
-    expect(html).toContain("NICK変更");
+    expect(html).toContain("現在のNICKを変更");
     expect(html).toContain("変更");
+    expect(html).toContain('action="/proxy/main/web/config"');
+    expect(html).toContain("接続デフォルト設定");
+    expect(html).toContain("保存だけを行い、現在の接続には即時反映しません。");
+    expect(html).toContain('name="autojoin"');
+    expect(html).toContain("空欄で保存すると、その項目の保存値をクリアして共有デフォルトへ戻します。");
     expect(html).not.toContain("{{SERVER_NAME}}");
     expect(html).not.toContain("{{NICK}}");
+  });
+
+  it("builds the channel list page with persisted config form values", () => {
+    const html = buildChannelListPage(
+      ["#general"],
+      "apricot",
+      "irc.example.com",
+      true,
+      "/proxy/main/web",
+      false,
+      false,
+      "",
+      "info",
+      { nick: "savednick", autojoin: "#general\n#random" },
+    );
+
+    expect(html).toContain('action="/proxy/main/web/config"');
+    expect(html).toContain('name="nick" value="savednick"');
+    expect(html).toContain('name="autojoin"');
+    expect(html).toContain("#general\n#random");
   });
 
   it("builds the channel list page with a danger flash message", () => {
@@ -387,8 +413,8 @@ describe("createWebModule", () => {
     expect(html).toContain('name="highlightKeywords"');
     expect(html).toContain('name="dimKeywords"');
     expect(html).toContain('name="enableInlineUrlPreview"');
-    expect(html).toContain("ライト");
-    expect(html).toContain("ダーク");
+    expect(html).toContain("Light");
+    expect(html).toContain("Dark");
     expect(html).toContain('"borderColor":"#0B5FFF"');
     expect(html).toContain("updateThemePreview");
     expect(html).toContain("scheduleThemePreviewUpdate");

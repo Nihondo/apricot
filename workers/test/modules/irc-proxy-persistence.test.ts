@@ -26,7 +26,7 @@ vi.mock("../../src/templates/channel-composer.html", () => ({
   default: "<html><head><style>{{CSS}}</style>{{THEME_CSS_LINK}}<script>{{ON_LOAD_SCRIPT}}</script></head><body>{{FLASH_MESSAGE}}<form action=\"{{ACTION_URL}}\" method=\"POST\">{{CHANNEL_LIST_LINK}}<input name=\"message\" value=\"{{MESSAGE_VALUE}}\"><button>送信</button></form></body></html>",
 }));
 vi.mock("../../src/templates/channel-list.html", () => ({
-  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{FLASH_MESSAGE}}{{NICK_FORM}}{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{FLASH_MESSAGE}}{{NICK_FORM}}{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}{{CONFIG_PANEL}}</body></html>",
 }));
 vi.mock("../../src/templates/login.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{ERROR}}<form action=\"{{ACTION_URL}}\" method=\"POST\"><input name=\"password\"></form></body></html>",
@@ -225,6 +225,120 @@ describe("IrcProxyDO web log persistence", () => {
     });
   });
 
+  it("renders persisted proxy config controls in the authenticated channel list page", async () => {
+    const state = new FakeState();
+    state.storage.seed(proxyConfigStorageKey, {
+      nick: "savednick",
+      autojoin: ["#general", "#random"],
+    });
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+    const cookieHeader = await loginWeb(proxy);
+
+    const response = await proxy.fetch(new Request("https://example.com/web/", {
+      headers: {
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+    }));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain('action="/proxy/main/web/config"');
+    expect(html).toContain("接続デフォルト設定");
+    expect(html).toContain('name="nick" value="savednick"');
+    expect(html).toContain("#general\n#random");
+    expect(html).toContain("現在のNICKを変更");
+  });
+
+  it("persists proxy config updates through POST /web/config", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+    const cookieHeader = await loginWeb(proxy);
+
+    const response = await proxy.fetch(new Request("https://example.com/web/config", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "nick=savednick&autojoin=%23general%0A%23random",
+    }));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("接続デフォルト設定を保存しました");
+    expect(state.storage.read(proxyConfigStorageKey)).toEqual({
+      nick: "savednick",
+      autojoin: ["#general", "#random"],
+    });
+  });
+
+  it("clears persisted proxy config through POST /web/config with blank values", async () => {
+    const state = new FakeState();
+    state.storage.seed(proxyConfigStorageKey, {
+      nick: "savednick",
+      autojoin: ["#general", "#random"],
+    });
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+    const cookieHeader = await loginWeb(proxy);
+
+    const response = await proxy.fetch(new Request("https://example.com/web/config", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "nick=&autojoin=",
+    }));
+    const html = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(html).toContain("接続デフォルト設定をクリアしました");
+    expect(state.storage.read(proxyConfigStorageKey)).toBeUndefined();
+    expect(html).toContain('name="nick" value=""');
+  });
+
+  it("keeps invalid web config form input and shows a validation error", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ CLIENT_PASSWORD: "secret" })
+    );
+    await state.initPromise;
+    const cookieHeader = await loginWeb(proxy);
+
+    const response = await proxy.fetch(new Request("https://example.com/web/config", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Cookie: cookieHeader,
+        "X-Proxy-Prefix": "/proxy/main",
+      },
+      body: "nick=savednick&autojoin=general",
+    }));
+    const html = await response.text();
+
+    expect(response.status).toBe(400);
+    expect(html).toContain("接続デフォルト設定の保存に失敗しました");
+    expect(html).toContain("invalid channel");
+    expect(html).toContain("general");
+    expect(state.storage.read(proxyConfigStorageKey)).toBeUndefined();
+  });
+
   it("hydrates persisted logs into the restored web messages page", async () => {
     const state = new FakeState();
     state.storage.seed(webLogsStorageKey, {
@@ -309,7 +423,7 @@ describe("IrcProxyDO web log persistence", () => {
     const listBeforeJoin = await proxy.fetch(new Request("https://example.com/web/", {
       headers: { Cookie: cookieHeader, "X-Proxy-Prefix": "/proxy/main" },
     }));
-    expect(await listBeforeJoin.text()).not.toContain("#general");
+    expect(await listBeforeJoin.text()).not.toContain('/proxy/main/web/%23general');
 
     await (proxy as any).handleServerMessage({
       prefix: "apricot!proxy@apricot",
@@ -320,7 +434,7 @@ describe("IrcProxyDO web log persistence", () => {
     const listAfterJoin = await proxy.fetch(new Request("https://example.com/web/", {
       headers: { Cookie: cookieHeader, "X-Proxy-Prefix": "/proxy/main" },
     }));
-    expect(await listAfterJoin.text()).toContain("#general");
+    expect(await listAfterJoin.text()).toContain('/proxy/main/web/%23general');
   });
 
   it("persists both server messages and self messages to storage", async () => {

@@ -307,8 +307,8 @@ function renderThemeColorFields(webUiSettings: WebUiSettings): string {
 function renderThemePresetControls(): string {
   return `<div class="admin-message admin-message--info" style="display:flex; align-items: center;"><strong>配色プリセット</strong>
 <div class="admin-form__actions" style="margin-left: auto;">
-  <button type="button" class="admin-button admin-button--subtle" data-theme-preset="light">ライト</button>
-  <button type="button" class="admin-button admin-button--subtle" data-theme-preset="dark">ダーク</button>
+  <button type="button" class="admin-button admin-button--subtle" data-theme-preset="light">Light</button>
+  <button type="button" class="admin-button admin-button--subtle" data-theme-preset="dark">Dark</button>
 </div>
 </div>`;
 }
@@ -1306,6 +1306,57 @@ function renderMessage(
 // Page builders
 // ---------------------------------------------------------------------------
 
+function buildNickChangeForm(nick: string, basePath: string): string {
+  return `
+<form action="${basePath}/nick" method="POST" class="admin-inline-form">
+  <label class="admin-field">
+    <span class="admin-field__label">現在のNICK</span>
+    <input type="text" name="nick" value="${escapeHtml(nick)}" class="admin-input" autocomplete="nickname">
+  </label>
+  <button type="submit" class="admin-button admin-button--subtle">現在のNICKを変更</button>
+</form>`;
+}
+
+function buildJoinForm(basePath: string): string {
+  return `
+<form action="${basePath}/join" method="POST" class="admin-inline-form">
+  <input type="text" name="channel" placeholder="#channel" class="admin-input" autocomplete="off">
+  <button type="submit" class="admin-button admin-button--primary">チャンネル参加</button>
+</form>`;
+}
+
+function buildPersistedProxyConfigSection(
+  basePath: string,
+  configFormValues: { nick: string; autojoin: string },
+): string {
+  return `
+  <section class="admin-panel">
+    <div class="admin-panel__header">
+      <div>
+        <h2 class="admin-section-title">接続デフォルト設定</h2>
+        <p class="admin-section-description">次回以降の接続時に使う nick と autojoin を保存します。</p>
+      </div>
+    </div>
+    <div class="admin-message admin-message--info">
+      <strong>保存だけを行い、現在の接続には即時反映しません。</strong>
+      <span>空欄で保存すると、その項目の保存値をクリアして共有デフォルトへ戻します。</span>
+    </div>
+    <form action="${basePath}/config" method="POST" class="admin-form">
+      <label class="admin-field">
+        <span class="admin-field__label">保存用nick</span>
+        <input type="text" name="nick" value="${escapeHtml(configFormValues.nick)}" class="admin-input" autocomplete="nickname">
+      </label>
+      <label class="admin-field">
+        <span class="admin-field__label">autojoin (1行に1チャンネル)</span>
+        <textarea name="autojoin" rows="4" class="admin-textarea" placeholder="#general&#10;#random">${escapeHtml(configFormValues.autojoin)}</textarea>
+      </label>
+      <div class="admin-form__actions">
+        <button type="submit" class="admin-button admin-button--primary">接続デフォルト設定を保存</button>
+      </div>
+    </form>
+  </section>`;
+}
+
 /** Pure function — no store needed */
 export function buildChannelListPage(
   channels: string[],
@@ -1317,22 +1368,14 @@ export function buildChannelListPage(
   showSettings = false,
   flashMessage = "",
   flashTone: "info" | "danger" = "info",
+  configFormValues: { nick: string; autojoin: string } = { nick: "", autojoin: "" },
 ): string {
   const flashHtml = renderFlashMessage(flashMessage, flashTone);
   const adminBrandHtml = renderAdminBrand(`${basePath}/assets/apricot-logo.png`);
   const webAppHeadHtml = buildWebAppHead(basePath, "#f7f8f9");
-  const nickForm = `
-<form action="${basePath}/nick" method="POST" class="admin-inline-form">
-  <label class="admin-field">
-    <input type="text" name="nick" value="${escapeHtml(nick)}" class="admin-input" autocomplete="nickname">
-  </label>
-  <button type="submit" class="admin-button admin-button--subtle">NICK変更</button>
-</form>`;
-  const joinForm = `
-<form action="${basePath}/join" method="POST" class="admin-inline-form">
-  <input type="text" name="channel" placeholder="#channel" class="admin-input" autocomplete="off">
-  <button type="submit" class="admin-button admin-button--primary">チャンネルに参加</button>
-</form>`;
+  const nickForm = buildNickChangeForm(nick, basePath);
+  const joinForm = buildJoinForm(basePath);
+  const configPanelHtml = buildPersistedProxyConfigSection(basePath, configFormValues);
   const chLinks = (channels.length === 0
     ? `<div class="admin-empty-state"><h3>参加中のチャンネルはありません</h3><p>JOIN 済みチャンネルはここに表示されます。下のフォームから参加できます。</p></div>`
     : channels
@@ -1344,7 +1387,7 @@ export function buildChannelListPage(
   </a>
   <form action="${basePath}/leave" method="POST">
     <input type="hidden" name="channel" value="${escapeHtml(ch)}">
-    <button type="submit" class="admin-button admin-button--danger">チャンネルから離脱</button>
+    <button type="submit" class="admin-button admin-button--danger">チャンネル離脱</button>
   </form>
 </div>`)
         .join("\n")) + `\n${joinForm}`;
@@ -1374,7 +1417,8 @@ export function buildChannelListPage(
     .replace("{{TOP_ACTIONS}}", actionParts.join(""))
     .replace("{{FLASH_MESSAGE}}", flashHtml)
     .replace("{{NICK_FORM}}", nickForm)
-    .replace("{{CHANNEL_LINKS}}", chLinks);
+    .replace("{{CHANNEL_LINKS}}", chLinks)
+    .replace("{{CONFIG_PANEL}}", configPanelHtml);
 }
 
 /**

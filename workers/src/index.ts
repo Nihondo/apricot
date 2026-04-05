@@ -12,6 +12,7 @@ import FAVICON_ICO from "../favicon.ico";
  *   GET  /proxy/:id/web/:ch/messages — Web chat message pane
  *   GET  /proxy/:id/web/:ch/composer — Web chat composer pane
  *   GET  /proxy/:id/web/login — Web UI login form
+ *   POST /proxy/:id/web/config — Web UI persisted proxy config save
  *   POST /proxy/:id/web/:ch/composer — Send message via web interface
  *   POST /proxy/:id/web/login — Web UI login
  *   POST /proxy/:id/web/logout — Web UI logout

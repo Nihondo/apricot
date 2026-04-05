@@ -169,6 +169,7 @@ export class IrcProxyDO implements DurableObject {
     const isWebLoginPath = url.pathname === "/web/login" || url.pathname === "/web/login/";
     const isWebLogoutPath = url.pathname === "/web/logout" || url.pathname === "/web/logout/";
     const isWebSettingsPath = url.pathname === "/web/settings" || url.pathname === "/web/settings/";
+    const isWebConfigPath = url.pathname === "/web/config" || url.pathname === "/web/config/";
     const isWebThemePath = url.pathname === "/web/theme.css" || url.pathname === "/web/theme.css/";
     const isWebManifestPath = url.pathname === "/web/manifest.webmanifest";
     const isWebAppIconPath = url.pathname === "/web/assets/app-icon.png";
@@ -361,6 +362,14 @@ export class IrcProxyDO implements DurableObject {
       return new Response("Method Not Allowed", { status: 405 });
     }
 
+    if (request.method === "POST" && isWebConfigPath) {
+      return this.handleWebConfig(request, webBase);
+    }
+
+    if (isWebConfigPath) {
+      return new Response("Method Not Allowed", { status: 405 });
+    }
+
     if (url.pathname === "/web/display-order" || url.pathname === "/web/display-order/") {
       return new Response("Not found", { status: 404 });
     }
@@ -371,13 +380,19 @@ export class IrcProxyDO implements DurableObject {
       const channelResult = validateChannelInput(formData.get("channel") as string | null);
       if (!channelResult.ok) {
         return new Response(
-          this.buildWebChannelListPage(webBase, this.nick, `JOIN に失敗しました: ${channelResult.error}`, "danger"),
+          this.buildWebChannelListPage(webBase, {
+            flashMessage: `JOIN に失敗しました: ${channelResult.error}`,
+            flashTone: "danger",
+          }),
           { status: 400, headers: { "Content-Type": "text/html; charset=utf-8" } }
         );
       }
       if (!this.serverConn?.connected) {
         return new Response(
-          this.buildWebChannelListPage(webBase, this.nick, "JOIN に失敗しました: not connected to IRC server", "danger"),
+          this.buildWebChannelListPage(webBase, {
+            flashMessage: "JOIN に失敗しました: not connected to IRC server",
+            flashTone: "danger",
+          }),
           { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } }
         );
       }
@@ -394,13 +409,19 @@ export class IrcProxyDO implements DurableObject {
       const channelResult = validateChannelInput(formData.get("channel") as string | null);
       if (!channelResult.ok) {
         return new Response(
-          this.buildWebChannelListPage(webBase, this.nick, `PART に失敗しました: ${channelResult.error}`, "danger"),
+          this.buildWebChannelListPage(webBase, {
+            flashMessage: `PART に失敗しました: ${channelResult.error}`,
+            flashTone: "danger",
+          }),
           { status: 400, headers: { "Content-Type": "text/html; charset=utf-8" } }
         );
       }
       if (!this.serverConn?.connected) {
         return new Response(
-          this.buildWebChannelListPage(webBase, this.nick, "PART に失敗しました: not connected to IRC server", "danger"),
+          this.buildWebChannelListPage(webBase, {
+            flashMessage: "PART に失敗しました: not connected to IRC server",
+            flashTone: "danger",
+          }),
           { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } }
         );
       }
@@ -760,7 +781,11 @@ export class IrcProxyDO implements DurableObject {
 
     if (!nickChangeResult.ok) {
       return new Response(
-        this.buildWebChannelListPage(webBase, nick, `NICK変更に失敗しました: ${nickChangeResult.error}`, "danger"),
+        this.buildWebChannelListPage(webBase, {
+          nick,
+          flashMessage: `NICK変更に失敗しました: ${nickChangeResult.error}`,
+          flashTone: "danger",
+        }),
         {
           status: nickChangeResult.status,
           headers: { "Content-Type": "text/html; charset=utf-8" },
@@ -769,7 +794,11 @@ export class IrcProxyDO implements DurableObject {
     }
 
     return new Response(
-      this.buildWebChannelListPage(webBase, nickChangeResult.nick, `NICKを ${nickChangeResult.nick} に変更しました`, "info"),
+      this.buildWebChannelListPage(webBase, {
+        nick: nickChangeResult.nick,
+        flashMessage: `NICKを ${nickChangeResult.nick} に変更しました`,
+        flashTone: "info",
+      }),
       {
         headers: { "Content-Type": "text/html; charset=utf-8" },
       }
@@ -778,20 +807,97 @@ export class IrcProxyDO implements DurableObject {
 
   private buildWebChannelListPage(
     webBase: string,
-    nick = this.nick,
-    flashMessage = "",
-    flashTone: "info" | "danger" = "info"
+    options: {
+      nick?: string;
+      flashMessage?: string;
+      flashTone?: "info" | "danger";
+      configFormValues?: { nick: string; autojoin: string };
+    } = {}
   ): string {
     return buildChannelListPage(
       this.channels,
-      nick,
+      options.nick ?? this.nick,
       this.serverName,
       this.serverConn?.connected ?? false,
       webBase,
       Boolean(this.config?.password),
       this.canEditWebSettings(),
-      flashMessage,
-      flashTone
+      options.flashMessage ?? "",
+      options.flashTone ?? "info",
+      options.configFormValues ?? this.buildWebPersistedConfigFormValues()
+    );
+  }
+
+  private buildWebPersistedConfigFormValues(
+    config: ProxyInstanceConfig | undefined = this.instanceConfig
+  ): { nick: string; autojoin: string } {
+    return {
+      nick: config?.nick ?? "",
+      autojoin: config?.autojoin?.join("\n") ?? "",
+    };
+  }
+
+  private readWebPersistedConfigFormValues(formData: FormData): { nick: string; autojoin: string } {
+    const nickValue = formData.get("nick");
+    const autojoinValue = formData.get("autojoin");
+    return {
+      nick: typeof nickValue === "string" ? nickValue : "",
+      autojoin: typeof autojoinValue === "string" ? autojoinValue : "",
+    };
+  }
+
+  private buildPersistedProxyConfigUpdateFromFormData(
+    currentConfig: ProxyInstanceConfig | undefined,
+    formData: FormData,
+  ):
+    | { ok: true; config?: ProxyInstanceConfig; formValues: { nick: string; autojoin: string } }
+    | { ok: false; error: string; status: number; formValues: { nick: string; autojoin: string } } {
+    const formValues = this.readWebPersistedConfigFormValues(formData);
+    const autojoin = formValues.autojoin
+      .split(/\r?\n/u)
+      .map((channel) => channel.trim())
+      .filter(Boolean);
+    const configUpdateResult = this.buildPersistedProxyConfigUpdate(currentConfig, {
+      nick: formValues.nick,
+      autojoin,
+    });
+
+    return { ...configUpdateResult, formValues };
+  }
+
+  private async handleWebConfig(request: Request, webBase: string): Promise<Response> {
+    const formData = await request.formData();
+    const configUpdateResult = this.buildPersistedProxyConfigUpdateFromFormData(this.instanceConfig, formData);
+
+    if (!configUpdateResult.ok) {
+      return new Response(
+        this.buildWebChannelListPage(webBase, {
+          flashMessage: `接続デフォルト設定の保存に失敗しました: ${configUpdateResult.error}`,
+          flashTone: "danger",
+          configFormValues: configUpdateResult.formValues,
+        }),
+        {
+          status: configUpdateResult.status,
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        }
+      );
+    }
+
+    await this.persistProxyConfig(configUpdateResult.config);
+    this.applyResolvedProxyConfig(configUpdateResult.config);
+
+    const successMessage = configUpdateResult.config
+      ? "接続デフォルト設定を保存しました"
+      : "接続デフォルト設定をクリアしました";
+    return new Response(
+      this.buildWebChannelListPage(webBase, {
+        flashMessage: successMessage,
+        flashTone: "info",
+        configFormValues: this.buildWebPersistedConfigFormValues(configUpdateResult.config),
+      }),
+      {
+        headers: { "Content-Type": "text/html; charset=utf-8" },
+      }
     );
   }
 
