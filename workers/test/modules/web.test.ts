@@ -197,6 +197,10 @@ describe("createWebModule", () => {
     expect(html).not.toContain("再読込");
     expect(html).toContain("nearBottomThreshold = 48");
     expect(html).toContain("sessionStorage.getItem");
+    expect(html).toContain("window.addEventListener(\"scroll\", updateShouldStickToBottom, { passive: true })");
+    expect(html).toContain("function setShouldStickToBottom(nextShouldStickToBottom)");
+    expect(html).toContain("function stickToBottomIfNeeded()");
+    expect(html).toContain("image.addEventListener(\"load\", stickToBottomIfNeeded, { once: true })");
     expect(html).toContain("beforeunload");
     expect(html).toContain("window.refreshMessages = refreshMessages");
     expect(html).toContain("/messages/fragment");
@@ -233,6 +237,8 @@ describe("createWebModule", () => {
     expect(html).toContain("再読込");
     expect(html).not.toContain("nearBottomThreshold = 48");
     expect(html).not.toContain("sessionStorage.getItem");
+    expect(html).not.toContain("setShouldStickToBottom");
+    expect(html).not.toContain("stickToBottomIfNeeded");
     expect(html).toContain('onclick="void refreshMessages();"');
     expect(html).not.toContain('onclick="location.reload();"');
   });

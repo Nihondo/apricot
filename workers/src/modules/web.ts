@@ -896,6 +896,7 @@ function buildConditionalAutoScrollScript(channel: string): string {
   return `window.apricotMessagesRuntime = window.apricotMessagesRuntime || {};
 var nearBottomThreshold = 48;
 var scrollStateStorageKey = ${storageKey};
+var shouldStickToBottom = readShouldStickToBottom();
 
 function getScrollRoot() {
   return document.scrollingElement || document.documentElement;
@@ -925,13 +926,31 @@ function writeShouldStickToBottom(shouldStickToBottom) {
   } catch {}
 }
 
-function scheduleBottomStick() {
+function setShouldStickToBottom(nextShouldStickToBottom) {
+  shouldStickToBottom = Boolean(nextShouldStickToBottom);
+  writeShouldStickToBottom(shouldStickToBottom);
+  return shouldStickToBottom;
+}
+
+function updateShouldStickToBottom() {
+  return setShouldStickToBottom(isNearBottom());
+}
+
+function stickToBottomIfNeeded() {
+  if (!shouldStickToBottom) {
+    return;
+  }
   scrollToBottom();
+}
+
+function scheduleBottomStick() {
+  setShouldStickToBottom(true);
+  stickToBottomIfNeeded();
   window.requestAnimationFrame(function () {
-    scrollToBottom();
-    window.requestAnimationFrame(scrollToBottom);
+    stickToBottomIfNeeded();
+    window.requestAnimationFrame(stickToBottomIfNeeded);
   });
-  window.setTimeout(scrollToBottom, 120);
+  window.setTimeout(stickToBottomIfNeeded, 120);
 }
 
 function bindPendingImages() {
@@ -939,23 +958,27 @@ function bindPendingImages() {
     if (image.complete) {
       return;
     }
-    image.addEventListener("load", scrollToBottom, { once: true });
+    image.addEventListener("load", stickToBottomIfNeeded, { once: true });
   });
 }
 
-var shouldStickToBottom = readShouldStickToBottom();
 if (shouldStickToBottom) {
   scheduleBottomStick();
   bindPendingImages();
 }
 
+window.addEventListener("scroll", updateShouldStickToBottom, { passive: true });
+
 window.addEventListener("beforeunload", function () {
-  writeShouldStickToBottom(isNearBottom());
+  updateShouldStickToBottom();
 });
 
 window.apricotMessagesRuntime.getScrollRoot = getScrollRoot;
 window.apricotMessagesRuntime.scrollToBottom = scrollToBottom;
 window.apricotMessagesRuntime.isNearBottom = isNearBottom;
+window.apricotMessagesRuntime.setShouldStickToBottom = setShouldStickToBottom;
+window.apricotMessagesRuntime.updateShouldStickToBottom = updateShouldStickToBottom;
+window.apricotMessagesRuntime.stickToBottomIfNeeded = stickToBottomIfNeeded;
 window.apricotMessagesRuntime.scheduleBottomStick = scheduleBottomStick;
 window.apricotMessagesRuntime.bindPendingImages = bindPendingImages;
 window.apricotMessagesRuntime.writeShouldStickToBottom = writeShouldStickToBottom;`;
@@ -1083,9 +1106,14 @@ async function refreshMessages() {
 
   apricotRefreshInFlight = true;
   var runtime = window.apricotMessagesRuntime || {};
-  var shouldStickAfterRefresh = apricotShouldAutoStick
-    && typeof runtime.isNearBottom === "function"
-    && runtime.isNearBottom();
+  var shouldStickAfterRefresh = false;
+  if (apricotShouldAutoStick) {
+    if (typeof runtime.updateShouldStickToBottom === "function") {
+      shouldStickAfterRefresh = runtime.updateShouldStickToBottom();
+    } else if (typeof runtime.isNearBottom === "function") {
+      shouldStickAfterRefresh = runtime.isNearBottom();
+    }
+  }
 
   try {
     var response = await fetch(getFragmentUrl(), {
