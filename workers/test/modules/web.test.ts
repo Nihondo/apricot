@@ -148,6 +148,7 @@ describe("createWebModule", () => {
     expect(composerFrameIndex).toBeLessThan(messagesFrameIndex);
     expect(html).toContain('src="/proxy/main/web/%23general/messages"');
     expect(html).toContain('src="/proxy/main/web/%23general/composer"');
+    expect(html).not.toContain("stickToLatestMessage");
   });
 
   it("buildChannelPage asc: messages iframe is placed before composer iframe", async () => {
@@ -164,6 +165,9 @@ describe("createWebModule", () => {
     const messagesFrameIndex = html.indexOf("channel-messages-frame");
     const composerFrameIndex = html.indexOf("channel-composer-frame");
     expect(messagesFrameIndex).toBeLessThan(composerFrameIndex);
+    expect(html).toContain("stickToLatestMessage");
+    expect(html).toContain('frame.addEventListener("load", stickToLatestMessage)');
+    expect(html).toContain("runtime.scheduleBottomStick");
   });
 
   it("buildChannelMessagesPage asc: messages stay chronological and only auto-scroll near bottom", async () => {

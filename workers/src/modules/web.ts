@@ -961,6 +961,41 @@ window.apricotMessagesRuntime.bindPendingImages = bindPendingImages;
 window.apricotMessagesRuntime.writeShouldStickToBottom = writeShouldStickToBottom;`;
 }
 
+function buildChannelShellInitialStickScript(): string {
+  return `<script>
+(function () {
+  var frame = document.getElementById("channel-messages-frame");
+  if (!frame) {
+    return;
+  }
+
+  function stickToLatestMessage() {
+    try {
+      var frameWindow = frame.contentWindow;
+      var runtime = frameWindow && frameWindow.apricotMessagesRuntime;
+      if (runtime && typeof runtime.scheduleBottomStick === "function") {
+        runtime.scheduleBottomStick();
+        if (typeof runtime.bindPendingImages === "function") {
+          runtime.bindPendingImages();
+        }
+        return;
+      }
+      var frameDocument = frame.contentDocument;
+      var root = frameDocument && (frameDocument.scrollingElement || frameDocument.documentElement);
+      if (frameWindow && root) {
+        frameWindow.scrollTo(0, root.scrollHeight);
+      }
+    } catch {}
+  }
+
+  frame.addEventListener("load", stickToLatestMessage);
+  if (frame.contentDocument && frame.contentDocument.readyState === "complete") {
+    stickToLatestMessage();
+  }
+})();
+</script>`;
+}
+
 function buildComposerOnLoadScript(shouldReloadMessages: boolean): string {
   const scriptLines = [
     "function preventComposerScroll(event) {",
@@ -1571,9 +1606,12 @@ export function createWebModule(
     const composerUrl = `${channelBasePath}/composer`;
     const messagesFrameHtml = `<iframe id="channel-messages-frame" class="channel-frame channel-frame--messages" src="${messagesUrl}" title="${escapeHtml(channel)} messages"></iframe>`;
     const composerFrameHtml = `<iframe id="channel-composer-frame" class="channel-frame channel-frame--composer" src="${composerUrl}" title="${escapeHtml(channel)} composer"></iframe>`;
-    const frameContent = webUiSettings.displayOrder === "asc"
+    const frameBodyHtml = webUiSettings.displayOrder === "asc"
       ? `${messagesFrameHtml}\n${composerFrameHtml}`
       : `${composerFrameHtml}\n${messagesFrameHtml}`;
+    const frameContent = webUiSettings.displayOrder === "asc"
+      ? `${frameBodyHtml}\n${buildChannelShellInitialStickScript()}`
+      : frameBodyHtml;
     const webAppHeadHtml = buildWebAppHead(basePath, webUiSettings.surfaceColor);
 
     return CHANNEL_SHELL_TEMPLATE
