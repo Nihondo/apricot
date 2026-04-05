@@ -414,8 +414,9 @@ describe("IrcProxyDO web log persistence", () => {
     expect(html).toContain("この設定はチャンネル画面にのみ適用されます。");
     expect(html).toContain("ADMIN_CSS");
     expect(html).toContain('data-theme-preview-root');
-    expect(html).toContain('data-theme-preview-messages');
-    expect(html).toContain('data-theme-preview-composer');
+    expect(html).toContain('data-theme-preview-frame');
+    expect(html).not.toContain('data-theme-preview-messages');
+    expect(html).not.toContain('data-theme-preview-composer');
     expect(html).toContain("/proxy/main/web/");
     expect(html).toContain('name="borderColor"');
     expect(html).toContain('value="#654321"');

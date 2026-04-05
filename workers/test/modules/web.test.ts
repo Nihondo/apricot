@@ -374,8 +374,9 @@ describe("createWebModule", () => {
     expect(html).toContain("この設定はチャンネル画面にのみ適用されます。");
     expect(html).toContain("入力エラー");
     expect(html).toContain('data-theme-preview-root');
-    expect(html).toContain('data-theme-preview-messages');
-    expect(html).toContain('data-theme-preview-composer');
+    expect(html).toContain('data-theme-preview-frame');
+    expect(html).not.toContain('data-theme-preview-messages');
+    expect(html).not.toContain('data-theme-preview-composer');
     expect(html).toContain('name="borderColor"');
     expect(html).toContain('name="mutedTextColor"');
     expect(html).toContain('name="keywordColor"');
@@ -386,7 +387,11 @@ describe("createWebModule", () => {
     expect(html).toContain("ダーク");
     expect(html).toContain('"borderColor":"#0B5FFF"');
     expect(html).toContain("updateThemePreview");
-    expect(html).toContain("data-theme-preview-order");
+    expect(html).toContain("buildPreviewShellDocument");
+    expect(html).not.toContain("previewMessagesTemplate");
+    expect(html).not.toContain("previewComposerTemplate");
+    expect(html).not.toContain("{{MESSAGES}}");
+    expect(html).not.toContain("{{CHANNEL_LIST_LINK}}");
     expect(html).toContain("checked");
     expect(html).toContain("ADMIN_CSS");
     expect(html.indexOf('data-theme-preview-root')).toBeLessThan(html.indexOf('name="fontFamily"'));

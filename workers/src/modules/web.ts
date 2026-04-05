@@ -339,26 +339,70 @@ function buildSettingsPreviewMessagesMarkup(webUiSettings: WebUiSettings): strin
 }
 
 function buildSettingsPreviewMessagesDocument(webUiSettings: WebUiSettings): string {
-  return CHANNEL_MESSAGES_TEMPLATE
+  return [
+    "<!DOCTYPE html>",
+    "<html><head>",
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, user-scalable=no">',
+    `<title>IRC: ${escapeHtml(SETTINGS_PREVIEW_CHANNEL_NAME)} / ${escapeHtml(SETTINGS_PREVIEW_TOPIC)}</title>`,
+    `<style>${buildChannelCss(webUiSettings)}</style>`,
+    "</head>",
+    '<body class="channel-messages-page">',
+    `<div id="channel-messages-shell" class="channel-messages-shell">${buildSettingsPreviewMessagesMarkup(webUiSettings)}</div>`,
+    "</body></html>",
+  ].join("");
+}
+
+function buildSettingsPreviewComposerDocument(webUiSettings: WebUiSettings): string {
+  return [
+    "<!DOCTYPE html>",
+    "<html><head>",
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, user-scalable=no">',
+    `<title>IRC: ${escapeHtml(SETTINGS_PREVIEW_CHANNEL_NAME)}/Composer</title>`,
+    `<style>${buildChannelCss(webUiSettings)}</style>`,
+    "</head>",
+    '<body class="channel-composer-page">',
+    '<div class="channel-composer-shell">',
+    '<form action="#preview" method="POST" class="message-form">',
+    '<a href="#preview" class="channel-list-link" aria-label="チャンネル一覧へ戻る" title="チャンネル一覧へ戻る">☰</a>',
+    `<input type="text" name="message" size="10" value="${escapeHtml(SETTINGS_PREVIEW_MESSAGE_VALUE)}" class="message-input" autocomplete="off">`,
+    '<input type="submit" value="送信" class="submit-button">',
+    "</form>",
+    "</div>",
+    "</body></html>",
+  ].join("");
+}
+
+function buildSettingsPreviewFrameHtml(
+  kind: "messages" | "composer",
+  title: string,
+  documentHtml: string,
+): string {
+  return `<iframe class="channel-frame channel-frame--${kind}" title="${escapeHtml(title)}" sandbox srcdoc="${escapeIframeSrcdoc(documentHtml)}"></iframe>`;
+}
+
+function buildSettingsPreviewShellDocument(webUiSettings: WebUiSettings): string {
+  const messagesFrameHtml = buildSettingsPreviewFrameHtml(
+    "messages",
+    "チャンネル表示プレビュー",
+    buildSettingsPreviewMessagesDocument(webUiSettings),
+  );
+  const composerFrameHtml = buildSettingsPreviewFrameHtml(
+    "composer",
+    "送信フォームプレビュー",
+    buildSettingsPreviewComposerDocument(webUiSettings),
+  );
+  const frameContent = webUiSettings.displayOrder === "asc"
+    ? `${messagesFrameHtml}\n${composerFrameHtml}`
+    : `${composerFrameHtml}\n${messagesFrameHtml}`;
+  return CHANNEL_SHELL_TEMPLATE
+    .replace("{{WEB_APP_HEAD}}", "")
     .replace("{{CSS}}", buildChannelCss(webUiSettings))
     .replace("{{THEME_CSS_LINK}}", "")
     .replace("{{CHANNEL}}", escapeHtml(SETTINGS_PREVIEW_CHANNEL_NAME))
     .replace("{{TOPIC}}", escapeHtml(SETTINGS_PREVIEW_TOPIC))
-    .replace("{{AUTO_SCROLL_SCRIPT}}", "")
-    .replace("{{MESSAGES}}", buildSettingsPreviewMessagesMarkup(webUiSettings))
-    .replace("{{RELOAD_BUTTON}}", "");
-}
-
-function buildSettingsPreviewComposerDocument(webUiSettings: WebUiSettings): string {
-  return CHANNEL_COMPOSER_TEMPLATE
-    .replace("{{CSS}}", buildChannelCss(webUiSettings))
-    .replace("{{THEME_CSS_LINK}}", "")
-    .replace("{{CHANNEL}}", escapeHtml(SETTINGS_PREVIEW_CHANNEL_NAME))
-    .replace("{{ACTION_URL}}", "#")
-    .replace("{{CHANNEL_LIST_LINK}}", '<span class="channel-list-link" aria-hidden="true">☰</span>')
-    .replace("{{FLASH_MESSAGE}}", "")
-    .replace("{{MESSAGE_VALUE}}", escapeHtml(SETTINGS_PREVIEW_MESSAGE_VALUE))
-    .replace("{{ON_LOAD_SCRIPT}}", "");
+    .replace("{{FRAME_CONTENT}}", frameContent);
 }
 
 function escapeIframeSrcdoc(documentHtml: string): string {
@@ -366,39 +410,18 @@ function escapeIframeSrcdoc(documentHtml: string): string {
 }
 
 function buildSettingsPreviewHtml(webUiSettings: WebUiSettings): string {
-  const messagesDocument = buildSettingsPreviewMessagesDocument(webUiSettings);
-  const composerDocument = buildSettingsPreviewComposerDocument(webUiSettings);
-  const isAscendingOrder = webUiSettings.displayOrder === "asc";
-  const messagesPanelHtml = `<section class="theme-preview__panel" data-theme-preview-panel="messages" style="order:${isAscendingOrder ? "1" : "2"};">
-  <div class="theme-preview__label">Messages</div>
-  <iframe
-    class="theme-preview__frame theme-preview__frame--messages"
-    data-theme-preview-messages
-    title="チャンネル表示プレビュー"
-    sandbox
-    srcdoc="${escapeIframeSrcdoc(messagesDocument)}"
-  ></iframe>
-</section>`;
-  const composerPanelHtml = `<section class="theme-preview__panel" data-theme-preview-panel="composer" style="order:${isAscendingOrder ? "2" : "1"};">
-  <div class="theme-preview__label">Composer</div>
-  <iframe
-    class="theme-preview__frame theme-preview__frame--composer"
-    data-theme-preview-composer
-    title="送信フォームプレビュー"
-    sandbox
-    srcdoc="${escapeIframeSrcdoc(composerDocument)}"
-  ></iframe>
-</section>`;
-
   return `<section class="theme-preview" data-theme-preview-root>
   <div class="theme-preview__header">
     <h3 class="theme-preview__title">表示プレビュー</h3>
     <p class="theme-preview__description">フォント、配色、表示順の変更結果を保存前に確認できます。</p>
   </div>
-  <div class="theme-preview__frames" data-theme-preview-order>
-    ${messagesPanelHtml}
-    ${composerPanelHtml}
-  </div>
+  <iframe
+    class="theme-preview__frame"
+    data-theme-preview-frame
+    title="チャンネルシェルプレビュー"
+    sandbox
+    srcdoc="${escapeIframeSrcdoc(buildSettingsPreviewShellDocument(webUiSettings))}"
+  ></iframe>
 </section>`;
 }
 
@@ -406,14 +429,13 @@ function renderThemePresetScript(): string {
   const lightPreset = JSON.stringify(LIGHT_WEB_UI_COLOR_PRESET);
   const darkPreset = JSON.stringify(DARK_WEB_UI_COLOR_PRESET);
   const colorFieldNames = JSON.stringify(WEB_UI_COLOR_FIELDS.map(({ name }) => name));
+  const channelShellTemplate = JSON.stringify(CHANNEL_SHELL_TEMPLATE);
   const previewMessageEntries = JSON.stringify(buildSettingsPreviewMessageEntries(DEFAULT_WEB_UI_SETTINGS));
-  const previewMessagesTemplate = JSON.stringify(CHANNEL_MESSAGES_TEMPLATE);
-  const previewComposerTemplate = JSON.stringify(CHANNEL_COMPOSER_TEMPLATE);
+  const defaultPreviewSettings = JSON.stringify(DEFAULT_WEB_UI_SETTINGS);
   const channelBaseCss = JSON.stringify(CSS);
   const previewChannelName = JSON.stringify(SETTINGS_PREVIEW_CHANNEL_NAME);
   const previewTopic = JSON.stringify(SETTINGS_PREVIEW_TOPIC);
   const previewMessageValue = JSON.stringify(SETTINGS_PREVIEW_MESSAGE_VALUE);
-  const previewComposerLink = JSON.stringify('<span class="channel-list-link" aria-hidden="true">☰</span>');
 
   return `<script>
 window.addEventListener("DOMContentLoaded", function () {
@@ -422,14 +444,13 @@ window.addEventListener("DOMContentLoaded", function () {
     dark: ${darkPreset}
   };
   var colorFieldNames = ${colorFieldNames};
+  var channelShellTemplate = ${channelShellTemplate};
   var previewMessageEntries = ${previewMessageEntries};
-  var previewMessagesTemplate = ${previewMessagesTemplate};
-  var previewComposerTemplate = ${previewComposerTemplate};
+  var defaultPreviewSettings = ${defaultPreviewSettings};
   var channelBaseCss = ${channelBaseCss};
   var previewChannelName = ${previewChannelName};
   var previewTopic = ${previewTopic};
   var previewMessageValue = ${previewMessageValue};
-  var previewComposerLink = ${previewComposerLink};
   var presetButtons = document.querySelectorAll("[data-theme-preset]");
 
   function buildPreviewChannelCss(settings) {
@@ -467,26 +488,32 @@ window.addEventListener("DOMContentLoaded", function () {
     return "rgba(" + red + "," + green + "," + blue + ",0.2)";
   }
 
+  function escapePreviewHtml(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
+  }
+
   function getPreviewSettings() {
-    var settings = {
-      fontFamily: "",
-      fontSizePx: 16,
-      displayOrder: "desc"
-    };
+    var settings = Object.assign({}, defaultPreviewSettings);
     var fontFamilyInput = document.querySelector('input[name="fontFamily"]');
     var fontSizeInput = document.querySelector('input[name="fontSizePx"]');
     var checkedDisplayOrder = document.querySelector('input[name="displayOrder"]:checked');
 
-    settings.fontFamily = fontFamilyInput ? fontFamilyInput.value : "";
-    settings.fontSizePx = fontSizeInput ? Number.parseInt(fontSizeInput.value || "16", 10) : 16;
-    settings.displayOrder = checkedDisplayOrder ? checkedDisplayOrder.value : "desc";
+    settings.fontFamily = fontFamilyInput && fontFamilyInput.value.trim()
+      ? fontFamilyInput.value
+      : defaultPreviewSettings.fontFamily;
+    settings.fontSizePx = fontSizeInput ? Number.parseInt(fontSizeInput.value || String(defaultPreviewSettings.fontSizePx), 10) : defaultPreviewSettings.fontSizePx;
+    settings.displayOrder = checkedDisplayOrder ? checkedDisplayOrder.value : defaultPreviewSettings.displayOrder;
     if (!Number.isFinite(settings.fontSizePx)) {
-      settings.fontSizePx = 16;
+      settings.fontSizePx = defaultPreviewSettings.fontSizePx;
     }
 
     colorFieldNames.forEach(function (fieldName) {
       var input = document.querySelector('[data-theme-color="' + fieldName + '"]');
-      settings[fieldName] = input ? input.value : "";
+      settings[fieldName] = input ? input.value : defaultPreviewSettings[fieldName];
     });
 
     return settings;
@@ -504,45 +531,54 @@ window.addEventListener("DOMContentLoaded", function () {
   }
 
   function buildPreviewMessagesDocument(settings) {
-    return previewMessagesTemplate
-      .replace("{{CSS}}", buildPreviewChannelCss(settings))
-      .replace("{{THEME_CSS_LINK}}", "")
-      .replace("{{CHANNEL}}", previewChannelName)
-      .replace("{{TOPIC}}", previewTopic)
-      .replace("{{AUTO_SCROLL_SCRIPT}}", "")
-      .replace("{{MESSAGES}}", buildPreviewMessagesMarkup(settings))
-      .replace("{{RELOAD_BUTTON}}", "");
+    return "<!DOCTYPE html><html><head>"
+      + '<meta charset="utf-8">'
+      + '<meta name="viewport" content="width=device-width, user-scalable=no">'
+      + "<title>IRC: " + escapePreviewHtml(previewChannelName) + " / " + escapePreviewHtml(previewTopic) + "</title>"
+      + "<style>" + buildPreviewChannelCss(settings) + "</style>"
+      + "</head><body class=\\"channel-messages-page\\">"
+      + '<div id="channel-messages-shell" class="channel-messages-shell">' + buildPreviewMessagesMarkup(settings) + "</div>"
+      + "</body></html>";
   }
 
   function buildPreviewComposerDocument(settings) {
-    return previewComposerTemplate
+    return "<!DOCTYPE html><html><head>"
+      + '<meta charset="utf-8">'
+      + '<meta name="viewport" content="width=device-width, user-scalable=no">'
+      + "<title>IRC: " + escapePreviewHtml(previewChannelName) + "/Composer</title>"
+      + "<style>" + buildPreviewChannelCss(settings) + "</style>"
+      + '</head><body class="channel-composer-page"><div class="channel-composer-shell">'
+      + '<form action="#preview" method="POST" class="message-form">'
+      + '<a href="#preview" class="channel-list-link" aria-label="チャンネル一覧へ戻る" title="チャンネル一覧へ戻る">☰</a>'
+      + '<input type="text" name="message" size="10" value="' + escapePreviewHtml(previewMessageValue) + '" class="message-input" autocomplete="off">'
+      + '<input type="submit" value="送信" class="submit-button">'
+      + "</form></div></body></html>";
+  }
+
+  function buildPreviewFrameHtml(kind, title, documentHtml) {
+    return '<iframe class="channel-frame channel-frame--' + kind + '" title="' + escapePreviewHtml(title) + '" sandbox srcdoc="' + escapePreviewHtml(documentHtml) + '"></iframe>';
+  }
+
+  function buildPreviewShellDocument(settings) {
+    var messagesFrameHtml = buildPreviewFrameHtml("messages", "チャンネル表示プレビュー", buildPreviewMessagesDocument(settings));
+    var composerFrameHtml = buildPreviewFrameHtml("composer", "送信フォームプレビュー", buildPreviewComposerDocument(settings));
+    var frameContent = settings.displayOrder === "asc"
+      ? messagesFrameHtml + "\\n" + composerFrameHtml
+      : composerFrameHtml + "\\n" + messagesFrameHtml;
+    return channelShellTemplate
+      .replace("{{WEB_APP_HEAD}}", "")
       .replace("{{CSS}}", buildPreviewChannelCss(settings))
       .replace("{{THEME_CSS_LINK}}", "")
-      .replace("{{CHANNEL}}", previewChannelName)
-      .replace("{{ACTION_URL}}", "#")
-      .replace("{{CHANNEL_LIST_LINK}}", previewComposerLink)
-      .replace("{{FLASH_MESSAGE}}", "")
-      .replace("{{MESSAGE_VALUE}}", previewMessageValue)
-      .replace("{{ON_LOAD_SCRIPT}}", "");
+      .replace("{{CHANNEL}}", escapePreviewHtml(previewChannelName))
+      .replace("{{TOPIC}}", escapePreviewHtml(previewTopic))
+      .replace("{{FRAME_CONTENT}}", frameContent);
   }
 
   function updateThemePreview() {
     var settings = getPreviewSettings();
-    var orderContainer = document.querySelector("[data-theme-preview-order]");
-    var messagesFrame = document.querySelector("[data-theme-preview-messages]");
-    var composerFrame = document.querySelector("[data-theme-preview-composer]");
-    var messagesPanel = document.querySelector('[data-theme-preview-panel="messages"]');
-    var composerPanel = document.querySelector('[data-theme-preview-panel="composer"]');
-    var isAscendingOrder = settings.displayOrder === "asc";
-    if (messagesFrame) {
-      messagesFrame.srcdoc = buildPreviewMessagesDocument(settings);
-    }
-    if (composerFrame) {
-      composerFrame.srcdoc = buildPreviewComposerDocument(settings);
-    }
-    if (orderContainer && messagesPanel && composerPanel) {
-      messagesPanel.style.order = isAscendingOrder ? "1" : "2";
-      composerPanel.style.order = isAscendingOrder ? "2" : "1";
+    var previewFrame = document.querySelector("[data-theme-preview-frame]");
+    if (previewFrame) {
+      previewFrame.srcdoc = buildPreviewShellDocument(settings);
     }
   }
 
