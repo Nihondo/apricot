@@ -1648,7 +1648,7 @@ export class IrcProxyDO implements DurableObject {
 
   private renderWebManifest(webBase: string): Response {
     const manifest = {
-      name: "apricot WebUI",
+      name: "apricot",
       short_name: "apricot",
       start_url: `${webBase}/`,
       scope: `${webBase}/`,
@@ -1658,7 +1658,7 @@ export class IrcProxyDO implements DurableObject {
       icons: [
         {
           src: `${webBase}/assets/app-icon.png`,
-          sizes: "1020x1020",
+          sizes: "512x512",
           type: "image/png",
           purpose: "any maskable",
         },
