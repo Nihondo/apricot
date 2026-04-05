@@ -12,6 +12,7 @@ import { createChannelTrackModule, type ChannelState } from "./modules/channel-t
 import { createClientSyncModule } from "./modules/client-sync";
 import {
   buildAdminCss,
+  buildWebAppHead,
   buildCustomThemeCss,
   buildChannelListPage,
   buildSettingsPage,
@@ -39,6 +40,7 @@ import {
 import { buildProxyConfigFromEnv, type ProxyConfig } from "./proxy-config";
 import { escapeUnsupportedIrcText } from "./irc-text-escape";
 import { sanitizeCustomCss } from "./custom-css";
+import APRICOT_APP_ICON_PNG from "./assets/apricot_app_icon.png";
 import APRICOT_LOGO_PNG from "./assets/apricot_logo.png";
 import LOGIN_TEMPLATE from "./templates/login.html";
 
@@ -153,6 +155,8 @@ export class IrcProxyDO implements DurableObject {
     const isWebLogoutPath = url.pathname === "/web/logout" || url.pathname === "/web/logout/";
     const isWebSettingsPath = url.pathname === "/web/settings" || url.pathname === "/web/settings/";
     const isWebThemePath = url.pathname === "/web/theme.css" || url.pathname === "/web/theme.css/";
+    const isWebManifestPath = url.pathname === "/web/manifest.webmanifest";
+    const isWebAppIconPath = url.pathname === "/web/assets/app-icon.png";
     const isWebLogoPath = url.pathname === "/web/assets/apricot-logo.png";
     const isWebRequest = url.pathname === "/web"
       || url.pathname === "/web/"
@@ -162,7 +166,12 @@ export class IrcProxyDO implements DurableObject {
       url.pathname === "/web" ||
       url.pathname === "/web/" ||
       /^\/web\/.+$/.test(url.pathname)
-    ) && !isWebLoginPath && !isWebLogoutPath && !isWebThemePath && !isWebLogoPath;
+    ) && !isWebLoginPath
+      && !isWebLogoutPath
+      && !isWebThemePath
+      && !isWebManifestPath
+      && !isWebAppIconPath
+      && !isWebLogoPath;
     const isProtectedWebAssetRequest = Boolean(webUpdatesMatch) || isWebThemePath || isWebLogoPath;
 
     if (isWebRequest && !this.config?.password) {
@@ -278,6 +287,19 @@ export class IrcProxyDO implements DurableObject {
 
     if (request.method === "GET" && isWebThemePath) {
       return this.renderWebThemeCss();
+    }
+
+    if (request.method === "GET" && isWebManifestPath) {
+      return this.renderWebManifest(webBase);
+    }
+
+    if (request.method === "GET" && isWebAppIconPath) {
+      return new Response(APRICOT_APP_ICON_PNG, {
+        headers: {
+          "Content-Type": "image/png",
+          "Cache-Control": "public, max-age=86400",
+        },
+      });
     }
 
     if (request.method === "GET" && isWebLogoPath) {
@@ -1599,12 +1621,15 @@ export class IrcProxyDO implements DurableObject {
     errorMessage = "",
     status = 200
   ): Response {
+    const webBase = actionUrl.replace(/\/login\/?$/, "");
     const errorHtml = errorMessage
       ? `<div class="admin-message admin-message--danger" role="alert"><strong>ログインに失敗しました。</strong><span>${errorMessage}</span></div>`
       : "";
+    const webAppHeadHtml = buildWebAppHead(webBase, "#f7f8f9");
 
     const html = LOGIN_TEMPLATE
       .replace("{{CSS}}", buildAdminCss())
+      .replace("{{WEB_APP_HEAD}}", webAppHeadHtml)
       .replace("{{ERROR}}", errorHtml)
       .replace("{{ACTION_URL}}", actionUrl);
 
@@ -1618,6 +1643,33 @@ export class IrcProxyDO implements DurableObject {
     return new Response(null, {
       status: 302,
       headers: { Location: `${webBase}/login` },
+    });
+  }
+
+  private renderWebManifest(webBase: string): Response {
+    const manifest = {
+      name: "apricot WebUI",
+      short_name: "apricot",
+      start_url: `${webBase}/`,
+      scope: `${webBase}/`,
+      display: "standalone",
+      background_color: "#f7f8f9",
+      theme_color: this.webUiSettings.surfaceColor,
+      icons: [
+        {
+          src: `${webBase}/assets/app-icon.png`,
+          sizes: "1020x1020",
+          type: "image/png",
+          purpose: "any maskable",
+        },
+      ],
+    };
+
+    return new Response(JSON.stringify(manifest), {
+      headers: {
+        "Content-Type": "application/manifest+json; charset=utf-8",
+        "Cache-Control": "public, max-age=3600",
+      },
     });
   }
 }

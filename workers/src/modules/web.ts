@@ -183,6 +183,19 @@ function renderAdminBrand(logoUrl: string): string {
   return `<div class="admin-brand"><img src="${escapeHtml(logoUrl)}" alt="apricot" class="admin-brand__image" width="315" height="103"></div>`;
 }
 
+export function buildWebAppHead(basePath: string, themeColor: string, appTitle = "apricot"): string {
+  const manifestUrl = `${basePath}/manifest.webmanifest`;
+  const appIconUrl = `${basePath}/assets/app-icon.png`;
+  return [
+    `<link rel="manifest" href="${escapeHtml(manifestUrl)}">`,
+    `<link rel="apple-touch-icon" href="${escapeHtml(appIconUrl)}">`,
+    `<meta name="theme-color" content="${escapeHtml(themeColor)}">`,
+    '<meta name="mobile-web-app-capable" content="yes">',
+    '<meta name="apple-mobile-web-app-capable" content="yes">',
+    `<meta name="apple-mobile-web-app-title" content="${escapeHtml(appTitle)}">`,
+  ].join("\n");
+}
+
 /**
  * Returns a cloned settings object with missing fields filled from defaults.
  */
@@ -946,6 +959,7 @@ export function buildChannelListPage(
 ): string {
   const flashHtml = renderFlashMessage(flashMessage, flashTone);
   const adminBrandHtml = renderAdminBrand(`${basePath}/assets/apricot-logo.png`);
+  const webAppHeadHtml = buildWebAppHead(basePath, "#f7f8f9");
   const nickForm = `
 <form action="${basePath}/nick" method="POST" class="admin-inline-form">
   <label class="admin-field">
@@ -988,6 +1002,7 @@ export function buildChannelListPage(
 
   return CHANNEL_LIST_TEMPLATE
     .replace("{{CSS}}", buildAdminCss())
+    .replace("{{WEB_APP_HEAD}}", webAppHeadHtml)
     .replace("{{ADMIN_BRAND}}", adminBrandHtml)
     .replace("{{STATUS_CLASS}}", statusClass)
     .replace("{{STATUS_TEXT}}", statusText)
@@ -1013,6 +1028,7 @@ export function buildSettingsPage(
 ): string {
   const isAscendingOrder = webUiSettings.displayOrder === "asc";
   const adminBrandHtml = renderAdminBrand(`${basePath}/assets/apricot-logo.png`);
+  const webAppHeadHtml = buildWebAppHead(basePath, "#f7f8f9");
   const topActionsHtml = `<a href="${basePath}/" class="admin-button admin-button--subtle">チャンネル一覧へ戻る</a>${renderAdminLogoutForm(basePath)}`;
   const errorHtml = renderSettingsError(errorMessage);
   const colorFieldsHtml = renderThemeColorFields(webUiSettings);
@@ -1021,6 +1037,7 @@ export function buildSettingsPage(
 
   return SETTINGS_TEMPLATE
     .replace("{{CSS}}", buildAdminCss())
+    .replace("{{WEB_APP_HEAD}}", webAppHeadHtml)
     .replace("{{ADMIN_BRAND}}", adminBrandHtml)
     .replace("{{NICK}}", escapeHtml(nick))
     .replace("{{SERVER_NAME}}", escapeHtml(serverName))
@@ -1229,8 +1246,10 @@ export function createWebModule(
     const frameContent = webUiSettings.displayOrder === "asc"
       ? `${messagesFrameHtml}\n${composerFrameHtml}`
       : `${composerFrameHtml}\n${messagesFrameHtml}`;
+    const webAppHeadHtml = buildWebAppHead(basePath, webUiSettings.surfaceColor);
 
     return CHANNEL_SHELL_TEMPLATE
+      .replace("{{WEB_APP_HEAD}}", webAppHeadHtml)
       .replace("{{CSS}}", buildChannelCss(webUiSettings))
       .replace("{{THEME_CSS_LINK}}", themeCssHref ? `<link rel="stylesheet" href="${themeCssHref}">` : "")
       .replace("{{CHANNEL}}", escapeHtml(channel))
