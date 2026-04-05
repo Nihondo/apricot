@@ -452,6 +452,7 @@ window.addEventListener("DOMContentLoaded", function () {
   var previewTopic = ${previewTopic};
   var previewMessageValue = ${previewMessageValue};
   var presetButtons = document.querySelectorAll("[data-theme-preset]");
+  var themePreviewUpdateScheduled = false;
 
   function buildPreviewChannelCss(settings) {
     var rootLines = [
@@ -582,13 +583,24 @@ window.addEventListener("DOMContentLoaded", function () {
     }
   }
 
+  function scheduleThemePreviewUpdate() {
+    if (themePreviewUpdateScheduled) {
+      return;
+    }
+    themePreviewUpdateScheduled = true;
+    window.requestAnimationFrame(function () {
+      themePreviewUpdateScheduled = false;
+      updateThemePreview();
+    });
+  }
+
   colorFieldNames.forEach(function (fieldName) {
     var input = document.querySelector('[data-theme-color="' + fieldName + '"]');
     if (!input) {
       return;
     }
-    input.addEventListener("input", updateThemePreview);
-    input.addEventListener("change", updateThemePreview);
+    input.addEventListener("input", scheduleThemePreviewUpdate);
+    input.addEventListener("change", scheduleThemePreviewUpdate);
   });
 
   [
@@ -600,8 +612,8 @@ window.addEventListener("DOMContentLoaded", function () {
     if (!input) {
       return;
     }
-    input.addEventListener("input", updateThemePreview);
-    input.addEventListener("change", updateThemePreview);
+    input.addEventListener("input", scheduleThemePreviewUpdate);
+    input.addEventListener("change", scheduleThemePreviewUpdate);
   });
 
   presetButtons.forEach(function (button) {
@@ -617,11 +629,9 @@ window.addEventListener("DOMContentLoaded", function () {
           input.value = preset[fieldName];
         }
       });
-      updateThemePreview();
+      scheduleThemePreviewUpdate();
     });
   });
-
-  updateThemePreview();
 });
 </script>`;
 }

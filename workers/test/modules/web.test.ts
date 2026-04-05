@@ -387,11 +387,13 @@ describe("createWebModule", () => {
     expect(html).toContain("ダーク");
     expect(html).toContain('"borderColor":"#0B5FFF"');
     expect(html).toContain("updateThemePreview");
+    expect(html).toContain("scheduleThemePreviewUpdate");
     expect(html).toContain("buildPreviewShellDocument");
     expect(html).not.toContain("previewMessagesTemplate");
     expect(html).not.toContain("previewComposerTemplate");
     expect(html).not.toContain("{{MESSAGES}}");
     expect(html).not.toContain("{{CHANNEL_LIST_LINK}}");
+    expect(html.match(/updateThemePreview\(\);/g)?.length ?? 0).toBe(1);
     expect(html).toContain("checked");
     expect(html).toContain("ADMIN_CSS");
     expect(html.indexOf('data-theme-preview-root')).toBeLessThan(html.indexOf('name="fontFamily"'));
