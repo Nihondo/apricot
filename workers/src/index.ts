@@ -19,6 +19,7 @@ import FAVICON_ICO from "../favicon.ico";
  *   POST /proxy/:id/api/leave — Leave a channel (Bearer auth)
  *   POST /proxy/:id/api/post — Programmatic message posting (Bearer auth)
  *   POST /proxy/:id/api/nick — Change IRC nick (Bearer auth)
+ *   PUT  /proxy/:id/api/config — Persist per-proxy defaults (Bearer auth)
  *   POST /proxy/:id/api/disconnect — Disconnect from IRC server (Bearer auth)
  *   GET  /proxy/:id/api/logs/:channel — Retrieve buffered messages for a channel (Bearer auth)
  *   GET  /favicon.ico            — Site favicon
@@ -84,6 +85,7 @@ export default {
 
     const headers = new Headers(request.headers);
     headers.set("X-Proxy-Prefix", `/proxy/${proxyId}`);
+    headers.set("X-Proxy-Id", proxyId);
 
     return stub.fetch(
       new Request(doUrl.toString(), {

@@ -103,4 +103,21 @@ describe("worker auth", () => {
     expect(get).toHaveBeenCalledWith("main");
     expect(fetch).toHaveBeenCalledTimes(1);
   });
+
+  it("forwards proxy metadata headers to the Durable Object", async () => {
+    const { env, fetch } = makeEnv();
+
+    await worker.fetch(
+      new Request("https://example.com/proxy/main/api/status", {
+        method: "GET",
+        headers: { Authorization: "Bearer secret-token" },
+      }),
+      env
+    );
+
+    const forwardedArgs = fetch.mock.lastCall as unknown[] | undefined;
+    const forwardedRequest = forwardedArgs?.[0] as Request;
+    expect(forwardedRequest.headers.get("X-Proxy-Id")).toBe("main");
+    expect(forwardedRequest.headers.get("X-Proxy-Prefix")).toBe("/proxy/main");
+  });
 });

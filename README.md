@@ -18,6 +18,20 @@ Cloudflare Workers + Durable Objects で動作します。
 
 ---
 
+## プロキシ ID とは
+
+apricot は **プロキシ ID** という識別子で IRC セッションを管理します。URL の `/proxy/<ID>/` の部分がプロキシ ID です。
+
+```
+https://example.workers.dev/proxy/alice/web/   ← "alice" がプロキシ ID
+```
+
+プロキシ ID ごとに IRC 接続・チャンネル状態・メッセージログ・表示設定が独立しています。1 つのデプロイで複数のプロキシ ID を使い分けられるため、複数人で共有する際はユーザーごとに異なるプロキシ ID を割り当てるだけで独立した IRC セッションを持てます。
+
+初回アクセス時、プロキシ ID が IRC のニックネームとして自動設定されます（例: プロキシ ID が `alice` なら nick は `alice`）。
+
+---
+
 ## クイックスタート（初回セットアップ）
 
 ### 1. 依存パッケージのインストール
@@ -46,6 +60,8 @@ IRC_ENCODING = "iso-2022-jp"   # 日本語サーバーの場合
 TIMEZONE_OFFSET = "9"           # JST (UTC+9)
 ENABLE_REMOTE_URL_PREVIEW = "false"
 ```
+
+> **補足**: `IRC_NICK` と `IRC_AUTOJOIN` は全プロキシ ID 共通のデフォルト値です。nick は初回アクセス時にプロキシ ID から自動設定されるため、1 人 1 プロキシ ID で使う場合は `IRC_NICK` の設定は不要です。プロキシ ID ごとに nick や autojoin を変えたい場合は `PUT /api/config` を使います。
 
 API キーなど秘密情報は `.dev.vars`（ローカル開発用）に記述します（`.gitignore` 済み）:
 
@@ -88,12 +104,31 @@ curl http://localhost:8787/proxy/myproxy/api/status \
 ```json
 {
   "connected": true,
-  "nick": "apricotbot",
+  "nick": "myproxy",
   "channels": ["#general", "#test"],
   "clients": 1,
   "serverName": "irc.libera.chat"
 }
 ```
+
+---
+
+## 複数ユーザで使うには
+
+プロキシ ID をユーザーごとに分けることで、1 つの Workers デプロイを複数人で共有できます。
+
+```
+Alice → https://.../proxy/alice/web/
+Bob   → https://.../proxy/bob/web/
+```
+
+各プロキシ ID は独立した環境を持ちます:
+
+- IRC 接続（nick は初回アクセス時にプロキシ ID から自動設定）
+- チャンネル状態・メッセージログ
+- Web UI の表示設定
+
+**注意**: `CLIENT_PASSWORD` はデプロイ全体で 1 つだけ設定できます。プロキシ ID ごとにパスワードを分けることはできないため、全ユーザーが同じパスワードを共有します。また、IRC サーバーの接続設定（`IRC_HOST` 等）も全プロキシ ID で共通です。
 
 ---
 
@@ -249,6 +284,19 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/nick \
 
 > **補足**: サーバーの応答を待ってからレスポンスを返します。nick が使用中の場合は `433 ERR_NICKNAMEINUSE` 等のエラーメッセージが返ります。5 秒以内にサーバーが応答しない場合は `503` を返します。
 
+#### プロキシ ID ごとの nick / autojoin を設定する
+
+初回アクセス時に自動設定された nick や autojoin をプロキシ ID ごとに変えたい場合は `PUT /api/config` を使います:
+
+```bash
+curl -X PUT http://localhost:8787/proxy/myproxy/api/config \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer your-api-key" \
+  -d '{"nick": "myproxy_alt", "autojoin": ["#general", "#random"]}'
+```
+
+ここで設定した値は**次回接続時のデフォルト**として保存されます。現在接続中の nick を即時変更したい場合は `POST /api/nick` を使ってください。`nick: null` または `autojoin: []` を送ると、その項目の保存値をクリアして共有デフォルトへ戻せます。
+
 #### IRC サーバーから切断する
 
 ```bash
@@ -293,23 +341,6 @@ curl http://localhost:8787/proxy/myproxy/api/logs/%23general \
 
 Web UI 設定画面では、URL プレビューを本文下に常時表示するかを切り替えられます。OFF の場合でも、対応する URL リンクでは PC の hover / focus とタッチ端末の長押し相当でプレビューできます。
 
-### 複数ユーザで使うには
-
-プロキシ ID をユーザーごとに分けることで、1 つの Workers デプロイを複数人で共有できます。
-
-```
-Alice → https://.../proxy/alice/web/
-Bob   → https://.../proxy/bob/web/
-```
-
-各プロキシ ID は独立した環境を持ちます:
-
-- IRC 接続（サーバー・ニックネーム・チャンネル状態）
-- メッセージログ
-- Web UI の表示設定
-
-**注意**: `CLIENT_PASSWORD` はデプロイ全体で 1 つだけ設定できます。プロキシ ID ごとにパスワードを分けることはできないため、全ユーザーが同じパスワードを共有します。また、IRC サーバーの接続設定（`IRC_HOST` 等）も全プロキシ ID で共通です。
-
 ---
 
 ## Cloudflare へのデプロイ
@@ -352,15 +383,15 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 |----------|:----:|-----------|------|
 | `IRC_HOST` | ✅ | ─ | IRC サーバーホスト名 |
 | `IRC_PORT` | ─ | `6667` | IRC サーバーポート（レンジ・複数指定可、例: `6660-6669` や `6660,6667,6697`） |
-| `IRC_NICK` | ─ | `apricot` | IRC ニックネーム |
+| `IRC_NICK` | ─ | `apricot` | IRC ニックネームのフォールバック値。実際の nick は初回アクセス時にプロキシ ID から自動設定される |
 | `IRC_USER` | ─ | `apricot` | IRC ユーザー名 |
 | `IRC_REALNAME` | ─ | `apricot IRC Proxy` | IRC リアルネーム |
-| `IRC_TLS` | ─ | `false` | TLS 使用（`true` / `false`） |
+| `IRC_TLS` | ─ | `false` | IRC サーバーへの TCP 接続に TLS を使用（`true` / `false`） |
 | `IRC_PASSWORD` | ─ | ─ | IRC サーバーパスワード（secret 推奨） |
 | `CLIENT_PASSWORD` | ─ | ─ | WebSocket クライアント接続と Web UI ログインの共通パスワード。未設定時は `/web/*` と `/ws` が `503` を返す |
 | `IRC_AUTO_CONNECT_ON_STARTUP` | ─ | `false` | Durable Object インスタンス起動時に IRC へ接続開始 |
 | `IRC_AUTO_RECONNECT_ON_DISCONNECT` | ─ | `false` | IRC 切断時に 5 秒後の自動再接続を有効化（API 手動切断時は抑制） |
-| `IRC_AUTOJOIN` | ─ | ─ | 自動参加チャンネル（カンマ区切り、例: `#general,#test`） |
+| `IRC_AUTOJOIN` | ─ | ─ | 自動参加チャンネルのデフォルト値（カンマ区切り、例: `#general,#test`）。プロキシ ID ごとに `PUT /api/config` で上書き可能 |
 | `IRC_ENCODING` | ─ | `utf-8` | IRC サーバーの文字コード（例: `iso-2022-jp`、`euc-jp`、`shift_jis`） |
 | `ENABLE_REMOTE_URL_PREVIEW` | ─ | `false` | 受信 IRC メッセージに含まれる URL の自動プレビュー解決を有効化 |
 | `KEEPALIVE_INTERVAL` | ─ | `60` | DO keepalive 間隔（秒） |
@@ -375,6 +406,11 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 プロキシは **プロキシ ID** 単位で独立した Durable Object インスタンスを持ちます。
 任意の文字列をプロキシ ID として使用できます（例: `myproxy`、`main`）。
 全インスタンスが同じ環境変数設定を共有しますが、IRC 接続やチャンネル状態は独立しています。
+
+nick の決定順序（高い方が優先）:
+1. `PUT /api/config` で保存したプロキシ ID ごとの nick
+2. 初回アクセス時にプロキシ ID から自動生成した nick（例: `alice` → nick `alice`）
+3. `wrangler.toml` の `IRC_NICK`
 
 ### API エンドポイント一覧
 
@@ -403,7 +439,8 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 | `POST` | `/proxy/:id/api/join` | Bearer | チャンネル参加 |
 | `POST` | `/proxy/:id/api/leave` | Bearer | チャンネル離脱 |
 | `POST` | `/proxy/:id/api/post` | Bearer | 外部投稿 |
-| `POST` | `/proxy/:id/api/nick` | Bearer | nick 変更 |
+| `POST` | `/proxy/:id/api/nick` | Bearer | nick 即時変更（IRC NICKコマンド送信） |
+| `PUT` | `/proxy/:id/api/config` | Bearer | プロキシ ID ごとの nick / autojoin を保存 |
 | `GET` | `/proxy/:id/api/logs/:channel` | Bearer | チャンネルログ取得 |
 | `GET` | `/proxy/:id/api/status` | Bearer | 接続状態確認 |
 | `OPTIONS` | `/proxy/:id/api/*` | ─ | CORS プリフライト |

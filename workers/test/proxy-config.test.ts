@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { buildProxyConfigFromEnv, parseBooleanEnv, parsePorts } from "../src/proxy-config";
+import {
+  buildProxyConfigFromEnv,
+  parseBooleanEnv,
+  parsePorts,
+  resolveProxyConfig,
+  sanitizeNick,
+} from "../src/proxy-config";
 
 describe("parseBooleanEnv", () => {
   it("treats common truthy values as enabled", () => {
@@ -86,5 +92,66 @@ describe("buildProxyConfigFromEnv", () => {
     } as Env;
 
     expect(buildProxyConfigFromEnv(env)).toBeNull();
+  });
+});
+
+describe("resolveProxyConfig", () => {
+  it("prefers stored nick and autojoin over proxy id and env defaults", () => {
+    const env = {
+      IRC_PROXY: {} as DurableObjectNamespace,
+      API_KEY: "token",
+      IRC_HOST: "irc.example.com",
+      IRC_PORT: "6667",
+      IRC_NICK: "envnick",
+      IRC_USER: "apricot",
+      IRC_REALNAME: "apricot IRC Proxy",
+      IRC_TLS: "false",
+      IRC_AUTOJOIN: "#env",
+      KEEPALIVE_INTERVAL: "60",
+    } as Env;
+
+    const resolvedConfig = resolveProxyConfig(
+      buildProxyConfigFromEnv(env),
+      { nick: "storednick", autojoin: ["#stored"] },
+      "proxy-main"
+    );
+
+    expect(resolvedConfig?.server.nick).toBe("storednick");
+    expect(resolvedConfig?.autojoin).toEqual(["#stored"]);
+  });
+
+  it("falls back to sanitized proxy id when stored nick is missing", () => {
+    const env = {
+      IRC_PROXY: {} as DurableObjectNamespace,
+      API_KEY: "token",
+      IRC_HOST: "irc.example.com",
+      IRC_PORT: "6667",
+      IRC_NICK: "envnick",
+      IRC_USER: "apricot",
+      IRC_REALNAME: "apricot IRC Proxy",
+      IRC_TLS: "false",
+      IRC_AUTOJOIN: "#env",
+      KEEPALIVE_INTERVAL: "60",
+    } as Env;
+
+    const resolvedConfig = resolveProxyConfig(
+      buildProxyConfigFromEnv(env),
+      undefined,
+      "123 invalid/proxy"
+    );
+
+    expect(resolvedConfig?.server.nick).toBe("a123_inva");
+    expect(resolvedConfig?.autojoin).toEqual(["#env"]);
+  });
+});
+
+describe("sanitizeNick", () => {
+  it("replaces unsupported characters and fixes a numeric first character", () => {
+    expect(sanitizeNick("123 invalid/proxy")).toBe("a123_inva");
+  });
+
+  it("returns undefined for blank values", () => {
+    expect(sanitizeNick("   ")).toBeUndefined();
+    expect(sanitizeNick(undefined)).toBeUndefined();
   });
 });

@@ -1,5 +1,9 @@
 import type { IrcServerConfig } from "./irc-connection";
 
+const ircNickBodyPattern = /[^A-Za-z0-9_\-[\]\\^{}|]/g;
+const ircNickHeadPattern = /^[A-Za-z_\-[\]\\^{}|]/;
+const maxDefaultNickLength = 9;
+
 /**
  * Runtime configuration for a single proxy instance.
  */
@@ -11,6 +15,14 @@ export interface ProxyConfig {
   autoConnectOnStartup: boolean;
   autoReconnectOnDisconnect: boolean;
   enableRemoteUrlPreview: boolean;
+}
+
+/**
+ * Persisted per-proxy overrides stored in Durable Object storage.
+ */
+export interface ProxyInstanceConfig {
+  nick?: string;
+  autojoin?: string[];
 }
 
 /**
@@ -38,6 +50,50 @@ export function buildProxyConfigFromEnv(env: Env): ProxyConfig | null {
     autoReconnectOnDisconnect: parseBooleanEnv(env.IRC_AUTO_RECONNECT_ON_DISCONNECT),
     enableRemoteUrlPreview: parseBooleanEnv(env.ENABLE_REMOTE_URL_PREVIEW),
   };
+}
+
+/**
+ * Resolves the effective proxy configuration from shared env and instance overrides.
+ */
+export function resolveProxyConfig(
+  baseConfig: ProxyConfig | null,
+  instanceConfig?: ProxyInstanceConfig,
+  proxyId?: string | null,
+): ProxyConfig | null {
+  if (!baseConfig) return null;
+
+  const resolvedNick = resolveNickValue(
+    instanceConfig?.nick,
+    sanitizeNick(proxyId),
+    baseConfig.server.nick,
+  );
+  const resolvedAutojoin = resolveAutojoinValue(instanceConfig?.autojoin, baseConfig.autojoin);
+
+  return {
+    ...baseConfig,
+    server: {
+      ...baseConfig.server,
+      nick: resolvedNick,
+    },
+    autojoin: resolvedAutojoin,
+  };
+}
+
+/**
+ * Converts a proxy id into a safe fallback IRC nick.
+ */
+export function sanitizeNick(value?: string | null): string | undefined {
+  const trimmedValue = value?.trim();
+  if (!trimmedValue) return undefined;
+
+  let sanitizedValue = trimmedValue.replace(ircNickBodyPattern, "_");
+  if (!sanitizedValue) return undefined;
+
+  if (!ircNickHeadPattern.test(sanitizedValue)) {
+    sanitizedValue = `a${sanitizedValue}`;
+  }
+
+  return sanitizedValue.slice(0, maxDefaultNickLength);
 }
 
 /**
@@ -81,4 +137,25 @@ function splitCsvValue(value?: string): string[] | undefined {
     .map((item) => item.trim())
     .filter(Boolean);
   return items?.length ? items : undefined;
+}
+
+function resolveNickValue(...candidates: Array<string | undefined>): string {
+  for (const candidate of candidates) {
+    const trimmedValue = candidate?.trim();
+    if (trimmedValue) {
+      return trimmedValue;
+    }
+  }
+  return "apricot";
+}
+
+function resolveAutojoinValue(
+  instanceAutojoin?: string[],
+  fallbackAutojoin?: string[],
+): string[] | undefined {
+  if (instanceAutojoin) {
+    return instanceAutojoin.length > 0 ? [...instanceAutojoin] : undefined;
+  }
+
+  return fallbackAutojoin ? [...fallbackAutojoin] : undefined;
 }

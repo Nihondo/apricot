@@ -37,7 +37,12 @@ import {
   validateNickInput,
   validatePasswordInput,
 } from "./input-validation";
-import { buildProxyConfigFromEnv, type ProxyConfig } from "./proxy-config";
+import {
+  buildProxyConfigFromEnv,
+  resolveProxyConfig,
+  type ProxyConfig,
+  type ProxyInstanceConfig,
+} from "./proxy-config";
 import { escapeUnsupportedIrcText } from "./irc-text-escape";
 import { sanitizeCustomCss } from "./custom-css";
 import APRICOT_APP_ICON_PNG from "./assets/apricot_app_icon.png";
@@ -45,6 +50,8 @@ import APRICOT_LOGO_PNG from "./assets/apricot_logo.png";
 import LOGIN_TEMPLATE from "./templates/login.html";
 
 const reconnectDelayMs = 5_000;
+const proxyConfigStorageKey = "proxy:config:v1";
+const proxyIdStorageKey = "proxy:id";
 const webLogsStorageKey = "web:logs:v1";
 const webUiSettingsStorageKey = "web:ui-settings:v1";
 const webAuthCookieName = "apricot_web_auth";
@@ -75,7 +82,10 @@ export class IrcProxyDO implements DurableObject {
   private clients = new Set<WebSocket>();
   private serverConn: IrcServerConnection | null = null;
   private modules = new ModuleRegistry();
+  private readonly envConfig: ProxyConfig | null;
   private config: ProxyConfig | null = null;
+  private instanceConfig?: ProxyInstanceConfig;
+  private proxyId: string | null = null;
   private nick = "";
   private channels: string[] = [];
   private serverName = "irc";
@@ -94,6 +104,8 @@ export class IrcProxyDO implements DurableObject {
 
   /** Keepalive alarm interval in ms */
   private keepaliveMs: number;
+  private hasInitializedProxyConfig = false;
+  private hasAttemptedStartupAutoConnect = false;
   private connectPromise: Promise<void> | null = null;
   private suppressAutoReconnectOnClose = false;
 
@@ -107,7 +119,8 @@ export class IrcProxyDO implements DurableObject {
 
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
-    this.config = buildProxyConfigFromEnv(env);
+    this.envConfig = buildProxyConfigFromEnv(env);
+    this.config = this.envConfig;
     this.keepaliveMs = (parseInt(env.KEEPALIVE_INTERVAL || "60", 10)) * 1000;
     if (this.config) {
       this.nick = this.config.server.nick;
@@ -139,11 +152,13 @@ export class IrcProxyDO implements DurableObject {
     void this.state.blockConcurrencyWhile(async () => {
       await this.loadPersistedWebUiSettings();
       await this.loadPersistedWebLogs();
-      await this.handleStartupAutoConnect();
     });
   }
 
   async fetch(request: Request): Promise<Response> {
+    await this.ensureProxyConfigInitialized(request);
+    await this.handleStartupAutoConnect();
+
     const url = new URL(request.url);
     const webUpdatesMatch = url.pathname.match(/^\/web\/(.+)\/updates\/?$/);
 
@@ -259,6 +274,11 @@ export class IrcProxyDO implements DurableObject {
     // POST /api/nick — request a nick change
     if (request.method === "POST" && url.pathname === "/api/nick") {
       return this.handleApiNick(request);
+    }
+
+    // PUT /api/config — persist per-proxy default config
+    if (request.method === "PUT" && url.pathname === "/api/config") {
+      return this.handleApiConfig(request);
     }
 
     // POST /api/disconnect — disconnect from IRC server
@@ -529,6 +549,8 @@ export class IrcProxyDO implements DurableObject {
    * Without this, the DO is evicted after ~2 min of idle and the TCP socket dies.
    */
   async alarm(): Promise<void> {
+    await this.ensureProxyConfigInitialized();
+
     if (this.serverConn?.connected) {
       await this.scheduleKeepaliveAlarm();
       return;
@@ -698,6 +720,37 @@ export class IrcProxyDO implements DurableObject {
     }
     const confirmedNick = nickChangeResult.nick;
     return Response.json({ ok: true, nick: confirmedNick }, { headers: corsHeaders() });
+  }
+
+  private async handleApiConfig(request: Request): Promise<Response> {
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json(
+        { error: "invalid JSON" },
+        { status: 400, headers: corsHeaders() }
+      );
+    }
+
+    const configUpdateResult = this.buildPersistedProxyConfigUpdate(this.instanceConfig, body);
+    if (!configUpdateResult.ok) {
+      return Response.json(
+        { error: configUpdateResult.error },
+        { status: configUpdateResult.status, headers: corsHeaders() }
+      );
+    }
+
+    await this.persistProxyConfig(configUpdateResult.config);
+    this.applyResolvedProxyConfig(configUpdateResult.config);
+
+    return Response.json({
+      ok: true,
+      config: {
+        nick: this.config?.server.nick ?? null,
+        autojoin: this.config?.autojoin ?? [],
+      },
+    }, { headers: corsHeaders() });
   }
 
   private async handleWebNick(request: Request, webBase: string): Promise<Response> {
@@ -1197,7 +1250,177 @@ export class IrcProxyDO implements DurableObject {
     };
   }
 
+  private async ensureProxyConfigInitialized(request?: Request): Promise<void> {
+    if (this.hasInitializedProxyConfig) return;
+
+    const requestProxyId = request?.headers.get("X-Proxy-Id");
+    const storedProxyId = await this.state.storage.get<string>(proxyIdStorageKey);
+    if (!storedProxyId && requestProxyId) {
+      await this.state.storage.put(proxyIdStorageKey, requestProxyId);
+    }
+
+    this.proxyId = storedProxyId ?? requestProxyId ?? null;
+
+    const storedConfig = await this.readPersistedProxyConfig();
+    this.applyResolvedProxyConfig(storedConfig);
+    this.hasInitializedProxyConfig = true;
+  }
+
+  private applyResolvedProxyConfig(newInstanceConfig?: ProxyInstanceConfig): void {
+    this.instanceConfig = newInstanceConfig;
+    this.config = resolveProxyConfig(this.envConfig, this.instanceConfig, this.proxyId);
+
+    if (!this.serverConn?.connected) {
+      this.nick = this.config?.server.nick ?? "";
+    }
+  }
+
+  private async readPersistedProxyConfig(): Promise<ProxyInstanceConfig | undefined> {
+    const storedConfig = await this.state.storage.get<unknown>(proxyConfigStorageKey);
+    return this.normalizeStoredProxyConfig(storedConfig);
+  }
+
+  private normalizeStoredProxyConfig(storedConfig: unknown): ProxyInstanceConfig | undefined {
+    if (!storedConfig || typeof storedConfig !== "object" || Array.isArray(storedConfig)) {
+      return undefined;
+    }
+
+    const storedRecord = storedConfig as {
+      nick?: unknown;
+      autojoin?: unknown;
+    };
+    const normalizedConfig: ProxyInstanceConfig = {};
+
+    if (typeof storedRecord.nick === "string") {
+      const nickResult = validateNickInput(storedRecord.nick);
+      if (nickResult.ok) {
+        normalizedConfig.nick = nickResult.value;
+      }
+    }
+
+    if (Array.isArray(storedRecord.autojoin)) {
+      const autojoinChannels = storedRecord.autojoin.flatMap((channel) => {
+        if (typeof channel !== "string") return [];
+        const channelResult = validateChannelInput(channel);
+        return channelResult.ok ? [channelResult.value] : [];
+      });
+      if (autojoinChannels.length > 0) {
+        normalizedConfig.autojoin = autojoinChannels;
+      }
+    }
+
+    return Object.keys(normalizedConfig).length > 0 ? normalizedConfig : undefined;
+  }
+
+  private buildPersistedProxyConfigUpdate(
+    currentConfig: ProxyInstanceConfig | undefined,
+    body: unknown,
+  ):
+    | { ok: true; config?: ProxyInstanceConfig }
+    | { ok: false; error: string; status: number } {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
+      return { ok: false, error: "invalid JSON", status: 400 };
+    }
+
+    const bodyRecord = body as {
+      nick?: unknown;
+      autojoin?: unknown;
+    };
+    const nextConfig: ProxyInstanceConfig = {
+      ...(currentConfig?.nick ? { nick: currentConfig.nick } : {}),
+      ...(currentConfig?.autojoin ? { autojoin: [...currentConfig.autojoin] } : {}),
+    };
+
+    if ("nick" in bodyRecord) {
+      const nickResult = this.normalizePersistedNickInput(bodyRecord.nick);
+      if (!nickResult.ok) {
+        return { ok: false, error: nickResult.error, status: 400 };
+      }
+      if (nickResult.value) {
+        nextConfig.nick = nickResult.value;
+      } else {
+        delete nextConfig.nick;
+      }
+    }
+
+    if ("autojoin" in bodyRecord) {
+      const autojoinResult = this.normalizePersistedAutojoinInput(bodyRecord.autojoin);
+      if (!autojoinResult.ok) {
+        return { ok: false, error: autojoinResult.error, status: 400 };
+      }
+      if (autojoinResult.value) {
+        nextConfig.autojoin = autojoinResult.value;
+      } else {
+        delete nextConfig.autojoin;
+      }
+    }
+
+    return {
+      ok: true,
+      config: Object.keys(nextConfig).length > 0 ? nextConfig : undefined,
+    };
+  }
+
+  private normalizePersistedNickInput(value: unknown):
+    | { ok: true; value?: string }
+    | { ok: false; error: string } {
+    if (value == null || value === "") {
+      return { ok: true, value: undefined };
+    }
+    if (typeof value !== "string") {
+      return { ok: false, error: "invalid nick" };
+    }
+
+    const nickResult = validateNickInput(value);
+    if (!nickResult.ok) {
+      return { ok: false, error: nickResult.error };
+    }
+
+    return { ok: true, value: nickResult.value };
+  }
+
+  private normalizePersistedAutojoinInput(value: unknown):
+    | { ok: true; value?: string[] }
+    | { ok: false; error: string } {
+    if (value == null) {
+      return { ok: true, value: undefined };
+    }
+    if (!Array.isArray(value)) {
+      return { ok: false, error: "invalid autojoin" };
+    }
+
+    const autojoinChannels: string[] = [];
+    for (const channel of value) {
+      if (typeof channel !== "string") {
+        return { ok: false, error: "invalid autojoin" };
+      }
+
+      const channelResult = validateChannelInput(channel);
+      if (!channelResult.ok) {
+        return { ok: false, error: channelResult.error };
+      }
+      autojoinChannels.push(channelResult.value);
+    }
+
+    return {
+      ok: true,
+      value: autojoinChannels.length > 0 ? autojoinChannels : undefined,
+    };
+  }
+
+  private async persistProxyConfig(config?: ProxyInstanceConfig): Promise<void> {
+    if (!config) {
+      await this.state.storage.delete(proxyConfigStorageKey);
+      return;
+    }
+
+    await this.state.storage.put(proxyConfigStorageKey, config);
+  }
+
   private async handleStartupAutoConnect(): Promise<void> {
+    if (this.hasAttemptedStartupAutoConnect) return;
+    this.hasAttemptedStartupAutoConnect = true;
+
     if (!this.config?.autoConnectOnStartup) return;
 
     try {

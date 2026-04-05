@@ -40,6 +40,8 @@ import type { PersistedWebLogs, WebUiSettings } from "../../src/modules/web";
 
 const webLogsStorageKey = "web:logs:v1";
 const webUiSettingsStorageKey = "web:ui-settings:v1";
+const proxyConfigStorageKey = "proxy:config:v1";
+const proxyIdStorageKey = "proxy:id";
 
 class FakeStorage {
   private values = new Map<string, unknown>();
@@ -60,6 +62,10 @@ class FakeStorage {
 
   async put(key: string, value: unknown): Promise<void> {
     this.values.set(key, structuredClone(value));
+  }
+
+  async delete(key: string): Promise<boolean> {
+    return this.values.delete(key);
   }
 
   async setAlarm(time: number): Promise<void> {
@@ -139,6 +145,84 @@ describe("IrcProxyDO web log persistence", () => {
     }));
 
     expect(response.status).toBe(503);
+  });
+
+  it("stores proxy id on first fetch and uses it as the default nick", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const response = await proxy.fetch(new Request("https://example.com/api/status", {
+      headers: {
+        "X-Proxy-Id": "mainroom",
+        "X-Proxy-Prefix": "/proxy/mainroom",
+      },
+    }));
+    const payload = await response.json() as { nick: string };
+
+    expect(payload.nick).toBe("mainroom");
+    expect(state.storage.read<string>(proxyIdStorageKey)).toBe("mainroom");
+  });
+
+  it("prefers persisted proxy config over proxy id defaults", async () => {
+    const state = new FakeState();
+    state.storage.seed(proxyIdStorageKey, "mainroom");
+    state.storage.seed(proxyConfigStorageKey, {
+      nick: "savednick",
+      autojoin: ["#saved"],
+    });
+
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const response = await proxy.fetch(new Request("https://example.com/api/status", {
+      headers: { "X-Proxy-Prefix": "/proxy/mainroom" },
+    }));
+    const payload = await response.json() as { nick: string };
+
+    expect(payload.nick).toBe("savednick");
+    expect((proxy as any).config?.autojoin).toEqual(["#saved"]);
+  });
+
+  it("persists per-proxy config updates through PUT /api/config", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const response = await proxy.fetch(new Request("https://example.com/api/config", {
+      method: "PUT",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Proxy-Id": "mainroom",
+        "X-Proxy-Prefix": "/proxy/mainroom",
+      },
+      body: JSON.stringify({
+        nick: "savednick",
+        autojoin: ["#general", "#random"],
+      }),
+    }));
+    const payload = await response.json() as {
+      config: { nick: string; autojoin: string[] };
+    };
+
+    expect(response.status).toBe(200);
+    expect(payload.config).toEqual({
+      nick: "savednick",
+      autojoin: ["#general", "#random"],
+    });
+    expect(state.storage.read(proxyConfigStorageKey)).toEqual({
+      nick: "savednick",
+      autojoin: ["#general", "#random"],
+    });
   });
 
   it("hydrates persisted logs into the restored web messages page", async () => {
