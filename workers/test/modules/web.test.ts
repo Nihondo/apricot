@@ -23,7 +23,7 @@ vi.mock("../../src/templates/channel-list.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}<p>{{SERVER_NAME}} に {{NICK}} として参加</p>{{FLASH_MESSAGE}}{{NICK_FORM}}<div>{{STATUS_CLASS}}{{STATUS_TEXT}}{{CHANNEL_COUNT}}{{CHANNEL_LINKS}}</div><span>サーバー: {{SERVER_NAME}}</span><span>NICK: {{NICK}}</span></body></html>",
 }));
 vi.mock("../../src/templates/settings.html", () => ({
-  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{ERROR}}この設定はチャンネル画面にのみ適用されます。{{PRESET_CONTROLS}}<form action=\"{{ACTION_URL}}\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\">{{COLOR_FIELDS}}<input type=\"checkbox\" name=\"enableInlineUrlPreview\" {{ENABLE_INLINE_URL_PREVIEW_CHECKED}}><textarea name=\"highlightKeywords\">{{HIGHLIGHT_KEYWORDS}}</textarea><textarea name=\"dimKeywords\">{{DIM_KEYWORDS}}</textarea><textarea>{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form>{{SETTINGS_SCRIPT}}</body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}{{ERROR}}この設定はチャンネル画面にのみ適用されます。<form action=\"{{ACTION_URL}}\">{{COLOR_PREVIEW}}<input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\">{{PRESET_CONTROLS}}{{COLOR_FIELDS}}<input type=\"checkbox\" name=\"enableInlineUrlPreview\" {{ENABLE_INLINE_URL_PREVIEW_CHECKED}}><textarea name=\"highlightKeywords\">{{HIGHLIGHT_KEYWORDS}}</textarea><textarea name=\"dimKeywords\">{{DIM_KEYWORDS}}</textarea><textarea>{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form>{{SETTINGS_SCRIPT}}</body></html>",
 }));
 
 import {
@@ -373,6 +373,9 @@ describe("createWebModule", () => {
     expect(html).toContain("body { color: blue; }");
     expect(html).toContain("この設定はチャンネル画面にのみ適用されます。");
     expect(html).toContain("入力エラー");
+    expect(html).toContain('data-theme-preview-root');
+    expect(html).toContain('data-theme-preview-messages');
+    expect(html).toContain('data-theme-preview-composer');
     expect(html).toContain('name="borderColor"');
     expect(html).toContain('name="mutedTextColor"');
     expect(html).toContain('name="keywordColor"');
@@ -382,8 +385,11 @@ describe("createWebModule", () => {
     expect(html).toContain("ライト");
     expect(html).toContain("ダーク");
     expect(html).toContain('"borderColor":"#0B5FFF"');
+    expect(html).toContain("updateThemePreview");
+    expect(html).toContain("data-theme-preview-order");
     expect(html).toContain("checked");
     expect(html).toContain("ADMIN_CSS");
+    expect(html.indexOf('data-theme-preview-root')).toBeLessThan(html.indexOf('name="fontFamily"'));
   });
 
   it("renders inline URL embeds when the setting is enabled", async () => {

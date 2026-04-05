@@ -368,6 +368,69 @@
   color: #5d1f1a;
 }
 
+.theme-preview {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--ds-border);
+  border-radius: 16px;
+  background: linear-gradient(180deg, #ffffff 0%, #fafbfc 100%);
+}
+
+.theme-preview__header {
+  display: grid;
+  gap: 4px;
+}
+
+.theme-preview__title {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.3;
+}
+
+.theme-preview__description {
+  margin: 0;
+  color: var(--ds-text-subtle);
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.theme-preview__frames {
+  display: grid;
+  gap: 12px;
+}
+
+.theme-preview__panel {
+  display: grid;
+  gap: 8px;
+}
+
+.theme-preview__label {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--ds-text-subtle);
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.theme-preview__frame {
+  width: 100%;
+  border: 1px solid var(--ds-border);
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: inset 0 1px 0 rgba(9, 30, 66, 0.03);
+}
+
+.theme-preview__frame--messages {
+  min-height: 232px;
+  height: 232px;
+}
+
+.theme-preview__frame--composer {
+  min-height: 52px;
+  height: 52px;
+}
+
 @media (max-width: 720px) {
   .admin-shell,
   .admin-shell--narrow {
@@ -392,5 +455,14 @@
   .admin-form__actions .admin-button,
   .admin-inline-form .admin-button {
     width: 100%;
+  }
+
+  .theme-preview {
+    padding: 14px;
+  }
+
+  .theme-preview__frame--messages {
+    min-height: 200px;
+    height: 200px;
   }
 }

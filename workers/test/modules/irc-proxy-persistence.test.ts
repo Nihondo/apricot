@@ -32,7 +32,7 @@ vi.mock("../../src/templates/login.html", () => ({
   default: "<html><head><style>{{CSS}}</style></head><body>{{ERROR}}<form action=\"{{ACTION_URL}}\" method=\"POST\"><input name=\"password\"></form></body></html>",
 }));
 vi.mock("../../src/templates/settings.html", () => ({
-  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}この設定はチャンネル画面にのみ適用されます。{{ERROR}}{{PRESET_CONTROLS}}<form action=\"{{ACTION_URL}}\" method=\"POST\"><input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\">{{COLOR_FIELDS}}<input type=\"checkbox\" name=\"enableInlineUrlPreview\" {{ENABLE_INLINE_URL_PREVIEW_CHECKED}}><textarea name=\"extraCss\">{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form>{{SETTINGS_SCRIPT}}</body></html>",
+  default: "<html><head><style>{{CSS}}</style></head><body>{{TOP_ACTIONS}}この設定はチャンネル画面にのみ適用されます。{{ERROR}}<form action=\"{{ACTION_URL}}\" method=\"POST\">{{COLOR_PREVIEW}}<input name=\"fontFamily\" value=\"{{FONT_FAMILY}}\"><input name=\"fontSizePx\" value=\"{{FONT_SIZE_PX}}\">{{PRESET_CONTROLS}}{{COLOR_FIELDS}}<input type=\"checkbox\" name=\"enableInlineUrlPreview\" {{ENABLE_INLINE_URL_PREVIEW_CHECKED}}><textarea name=\"extraCss\">{{EXTRA_CSS}}</textarea>{{DISPLAY_ORDER_ASC_CHECKED}}{{DISPLAY_ORDER_DESC_CHECKED}}</form>{{SETTINGS_SCRIPT}}</body></html>",
 }));
 
 import { IrcProxyDO } from "../../src/irc-proxy";
@@ -413,7 +413,9 @@ describe("IrcProxyDO web log persistence", () => {
     expect(html).toContain("color: blue;");
     expect(html).toContain("この設定はチャンネル画面にのみ適用されます。");
     expect(html).toContain("ADMIN_CSS");
-    expect(html).not.toContain("font-size: 18px;");
+    expect(html).toContain('data-theme-preview-root');
+    expect(html).toContain('data-theme-preview-messages');
+    expect(html).toContain('data-theme-preview-composer');
     expect(html).toContain("/proxy/main/web/");
     expect(html).toContain('name="borderColor"');
     expect(html).toContain('value="#654321"');

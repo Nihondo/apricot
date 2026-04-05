@@ -115,6 +115,39 @@ export const DEFAULT_WEB_UI_SETTINGS: WebUiSettings = {
   enableInlineUrlPreview: false,
 };
 
+const SETTINGS_PREVIEW_CHANNEL_NAME = "#preview";
+const SETTINGS_PREVIEW_TOPIC = "配色プレビュー";
+const SETTINGS_PREVIEW_MESSAGE_VALUE = "送信テキストの見本";
+const SETTINGS_PREVIEW_SELF_NICK = "apricot";
+const SETTINGS_PREVIEW_HIGHLIGHT_KEYWORDS = ["重要ワード"];
+const SETTINGS_PREVIEW_DIM_KEYWORDS = ["log noise"];
+const SETTINGS_PREVIEW_MESSAGES: ReadonlyArray<StoredMessage> = [
+  {
+    time: (9 * 60 + 41) * 60_000,
+    type: "self",
+    nick: SETTINGS_PREVIEW_SELF_NICK,
+    text: "プレビュー表示を確認します",
+  },
+  {
+    time: (9 * 60 + 42) * 60_000,
+    type: "privmsg",
+    nick: "alice",
+    text: "資料は https://example.com/docs にあります",
+  },
+  {
+    time: (9 * 60 + 43) * 60_000,
+    type: "privmsg",
+    nick: "bob",
+    text: "重要ワード を含むメッセージです",
+  },
+  {
+    time: (9 * 60 + 44) * 60_000,
+    type: "notice",
+    nick: "server",
+    text: "log noise: バックグラウンド通知",
+  },
+] as const;
+
 type MessageBufferStore = Map<string, StoredMessage[]>;
 type PersistLogsCallback = (logs: PersistedWebLogs) => Promise<void>;
 type ChannelLogsChangedCallback = (channels: string[]) => void;
@@ -280,9 +313,107 @@ function renderThemePresetControls(): string {
 </div>`;
 }
 
+function buildSettingsPreviewMessageEntries(webUiSettings: WebUiSettings): Array<{ html: string; isDimmed: boolean }> {
+  return SETTINGS_PREVIEW_MESSAGES.map((message) => ({
+    html: renderMessage(
+      message,
+      SETTINGS_PREVIEW_SELF_NICK,
+      0,
+      SETTINGS_PREVIEW_HIGHLIGHT_KEYWORDS,
+      webUiSettings,
+    ),
+    isDimmed: SETTINGS_PREVIEW_DIM_KEYWORDS.some((keyword) =>
+      message.text.toLowerCase().includes(keyword.toLowerCase())
+    ),
+  }));
+}
+
+function buildSettingsPreviewMessagesMarkup(webUiSettings: WebUiSettings): string {
+  const lineEntries = buildSettingsPreviewMessageEntries(webUiSettings);
+  const orderedEntries = webUiSettings.displayOrder === "asc"
+    ? lineEntries
+    : [...lineEntries].reverse();
+  return orderedEntries
+    .map((entry) => entry.isDimmed ? `<div class="msg-dimmed">${entry.html}</div>` : `<div>${entry.html}</div>`)
+    .join("\n");
+}
+
+function buildSettingsPreviewMessagesDocument(webUiSettings: WebUiSettings): string {
+  return CHANNEL_MESSAGES_TEMPLATE
+    .replace("{{CSS}}", buildChannelCss(webUiSettings))
+    .replace("{{THEME_CSS_LINK}}", "")
+    .replace("{{CHANNEL}}", escapeHtml(SETTINGS_PREVIEW_CHANNEL_NAME))
+    .replace("{{TOPIC}}", escapeHtml(SETTINGS_PREVIEW_TOPIC))
+    .replace("{{AUTO_SCROLL_SCRIPT}}", "")
+    .replace("{{MESSAGES}}", buildSettingsPreviewMessagesMarkup(webUiSettings))
+    .replace("{{RELOAD_BUTTON}}", "");
+}
+
+function buildSettingsPreviewComposerDocument(webUiSettings: WebUiSettings): string {
+  return CHANNEL_COMPOSER_TEMPLATE
+    .replace("{{CSS}}", buildChannelCss(webUiSettings))
+    .replace("{{THEME_CSS_LINK}}", "")
+    .replace("{{CHANNEL}}", escapeHtml(SETTINGS_PREVIEW_CHANNEL_NAME))
+    .replace("{{ACTION_URL}}", "#")
+    .replace("{{CHANNEL_LIST_LINK}}", '<span class="channel-list-link" aria-hidden="true">☰</span>')
+    .replace("{{FLASH_MESSAGE}}", "")
+    .replace("{{MESSAGE_VALUE}}", escapeHtml(SETTINGS_PREVIEW_MESSAGE_VALUE))
+    .replace("{{ON_LOAD_SCRIPT}}", "");
+}
+
+function escapeIframeSrcdoc(documentHtml: string): string {
+  return escapeHtml(documentHtml);
+}
+
+function buildSettingsPreviewHtml(webUiSettings: WebUiSettings): string {
+  const messagesDocument = buildSettingsPreviewMessagesDocument(webUiSettings);
+  const composerDocument = buildSettingsPreviewComposerDocument(webUiSettings);
+  const isAscendingOrder = webUiSettings.displayOrder === "asc";
+  const messagesPanelHtml = `<section class="theme-preview__panel" data-theme-preview-panel="messages" style="order:${isAscendingOrder ? "1" : "2"};">
+  <div class="theme-preview__label">Messages</div>
+  <iframe
+    class="theme-preview__frame theme-preview__frame--messages"
+    data-theme-preview-messages
+    title="チャンネル表示プレビュー"
+    sandbox
+    srcdoc="${escapeIframeSrcdoc(messagesDocument)}"
+  ></iframe>
+</section>`;
+  const composerPanelHtml = `<section class="theme-preview__panel" data-theme-preview-panel="composer" style="order:${isAscendingOrder ? "2" : "1"};">
+  <div class="theme-preview__label">Composer</div>
+  <iframe
+    class="theme-preview__frame theme-preview__frame--composer"
+    data-theme-preview-composer
+    title="送信フォームプレビュー"
+    sandbox
+    srcdoc="${escapeIframeSrcdoc(composerDocument)}"
+  ></iframe>
+</section>`;
+
+  return `<section class="theme-preview" data-theme-preview-root>
+  <div class="theme-preview__header">
+    <h3 class="theme-preview__title">表示プレビュー</h3>
+    <p class="theme-preview__description">フォント、配色、表示順の変更結果を保存前に確認できます。</p>
+  </div>
+  <div class="theme-preview__frames" data-theme-preview-order>
+    ${messagesPanelHtml}
+    ${composerPanelHtml}
+  </div>
+</section>`;
+}
+
 function renderThemePresetScript(): string {
   const lightPreset = JSON.stringify(LIGHT_WEB_UI_COLOR_PRESET);
   const darkPreset = JSON.stringify(DARK_WEB_UI_COLOR_PRESET);
+  const colorFieldNames = JSON.stringify(WEB_UI_COLOR_FIELDS.map(({ name }) => name));
+  const previewMessageEntries = JSON.stringify(buildSettingsPreviewMessageEntries(DEFAULT_WEB_UI_SETTINGS));
+  const previewMessagesTemplate = JSON.stringify(CHANNEL_MESSAGES_TEMPLATE);
+  const previewComposerTemplate = JSON.stringify(CHANNEL_COMPOSER_TEMPLATE);
+  const channelBaseCss = JSON.stringify(CSS);
+  const previewChannelName = JSON.stringify(SETTINGS_PREVIEW_CHANNEL_NAME);
+  const previewTopic = JSON.stringify(SETTINGS_PREVIEW_TOPIC);
+  const previewMessageValue = JSON.stringify(SETTINGS_PREVIEW_MESSAGE_VALUE);
+  const previewComposerLink = JSON.stringify('<span class="channel-list-link" aria-hidden="true">☰</span>');
 
   return `<script>
 window.addEventListener("DOMContentLoaded", function () {
@@ -290,7 +421,153 @@ window.addEventListener("DOMContentLoaded", function () {
     light: ${lightPreset},
     dark: ${darkPreset}
   };
+  var colorFieldNames = ${colorFieldNames};
+  var previewMessageEntries = ${previewMessageEntries};
+  var previewMessagesTemplate = ${previewMessagesTemplate};
+  var previewComposerTemplate = ${previewComposerTemplate};
+  var channelBaseCss = ${channelBaseCss};
+  var previewChannelName = ${previewChannelName};
+  var previewTopic = ${previewTopic};
+  var previewMessageValue = ${previewMessageValue};
+  var previewComposerLink = ${previewComposerLink};
   var presetButtons = document.querySelectorAll("[data-theme-preset]");
+
+  function buildPreviewChannelCss(settings) {
+    var rootLines = [
+      "--rowcolor0: " + settings.surfaceColor + ";",
+      "--rowcolor1: " + settings.surfaceAltColor + ";",
+      "--textcolor: " + settings.textColor + ";",
+      "--accent-link: " + settings.accentColor + ";",
+      "--link-bg: " + buildLinkBackgroundColor(settings.accentColor) + ";",
+      "--border-color: " + settings.borderColor + ";",
+      "--accent-username: " + settings.usernameColor + ";",
+      "--accent-timestamp: " + settings.timestampColor + ";",
+      "--accent-highlight: " + settings.highlightColor + ";",
+      "--button-bg: " + settings.buttonColor + ";",
+      "--button-fg: " + settings.buttonTextColor + ";",
+      "--accent-self: " + settings.selfColor + ";",
+      "--text-contrast-low: " + settings.mutedTextColor + ";",
+      "--accent-keyword: " + settings.keywordColor + ";"
+    ];
+    var typographyLines = [
+      "font-family: " + settings.fontFamily + ";",
+      "font-size: " + settings.fontSizePx + "px;"
+    ];
+    return [
+      channelBaseCss,
+      ":root {\\n  " + rootLines.join("\\n  ") + "\\n}",
+      "body,\\ninput,\\nbutton,\\ntextarea {\\n  " + typographyLines.join("\\n  ") + "\\n}"
+    ].join("\\n\\n");
+  }
+
+  function buildLinkBackgroundColor(accentColor) {
+    var red = Number.parseInt(accentColor.slice(1, 3), 16);
+    var green = Number.parseInt(accentColor.slice(3, 5), 16);
+    var blue = Number.parseInt(accentColor.slice(5, 7), 16);
+    return "rgba(" + red + "," + green + "," + blue + ",0.2)";
+  }
+
+  function getPreviewSettings() {
+    var settings = {
+      fontFamily: "",
+      fontSizePx: 16,
+      displayOrder: "desc"
+    };
+    var fontFamilyInput = document.querySelector('input[name="fontFamily"]');
+    var fontSizeInput = document.querySelector('input[name="fontSizePx"]');
+    var checkedDisplayOrder = document.querySelector('input[name="displayOrder"]:checked');
+
+    settings.fontFamily = fontFamilyInput ? fontFamilyInput.value : "";
+    settings.fontSizePx = fontSizeInput ? Number.parseInt(fontSizeInput.value || "16", 10) : 16;
+    settings.displayOrder = checkedDisplayOrder ? checkedDisplayOrder.value : "desc";
+    if (!Number.isFinite(settings.fontSizePx)) {
+      settings.fontSizePx = 16;
+    }
+
+    colorFieldNames.forEach(function (fieldName) {
+      var input = document.querySelector('[data-theme-color="' + fieldName + '"]');
+      settings[fieldName] = input ? input.value : "";
+    });
+
+    return settings;
+  }
+
+  function buildPreviewMessagesMarkup(settings) {
+    var orderedEntries = settings.displayOrder === "asc"
+      ? previewMessageEntries.slice()
+      : previewMessageEntries.slice().reverse();
+    return orderedEntries.map(function (entry) {
+      return entry.isDimmed
+        ? '<div class="msg-dimmed">' + entry.html + "</div>"
+        : "<div>" + entry.html + "</div>";
+    }).join("\\n");
+  }
+
+  function buildPreviewMessagesDocument(settings) {
+    return previewMessagesTemplate
+      .replace("{{CSS}}", buildPreviewChannelCss(settings))
+      .replace("{{THEME_CSS_LINK}}", "")
+      .replace("{{CHANNEL}}", previewChannelName)
+      .replace("{{TOPIC}}", previewTopic)
+      .replace("{{AUTO_SCROLL_SCRIPT}}", "")
+      .replace("{{MESSAGES}}", buildPreviewMessagesMarkup(settings))
+      .replace("{{RELOAD_BUTTON}}", "");
+  }
+
+  function buildPreviewComposerDocument(settings) {
+    return previewComposerTemplate
+      .replace("{{CSS}}", buildPreviewChannelCss(settings))
+      .replace("{{THEME_CSS_LINK}}", "")
+      .replace("{{CHANNEL}}", previewChannelName)
+      .replace("{{ACTION_URL}}", "#")
+      .replace("{{CHANNEL_LIST_LINK}}", previewComposerLink)
+      .replace("{{FLASH_MESSAGE}}", "")
+      .replace("{{MESSAGE_VALUE}}", previewMessageValue)
+      .replace("{{ON_LOAD_SCRIPT}}", "");
+  }
+
+  function updateThemePreview() {
+    var settings = getPreviewSettings();
+    var orderContainer = document.querySelector("[data-theme-preview-order]");
+    var messagesFrame = document.querySelector("[data-theme-preview-messages]");
+    var composerFrame = document.querySelector("[data-theme-preview-composer]");
+    var messagesPanel = document.querySelector('[data-theme-preview-panel="messages"]');
+    var composerPanel = document.querySelector('[data-theme-preview-panel="composer"]');
+    var isAscendingOrder = settings.displayOrder === "asc";
+    if (messagesFrame) {
+      messagesFrame.srcdoc = buildPreviewMessagesDocument(settings);
+    }
+    if (composerFrame) {
+      composerFrame.srcdoc = buildPreviewComposerDocument(settings);
+    }
+    if (orderContainer && messagesPanel && composerPanel) {
+      messagesPanel.style.order = isAscendingOrder ? "1" : "2";
+      composerPanel.style.order = isAscendingOrder ? "2" : "1";
+    }
+  }
+
+  colorFieldNames.forEach(function (fieldName) {
+    var input = document.querySelector('[data-theme-color="' + fieldName + '"]');
+    if (!input) {
+      return;
+    }
+    input.addEventListener("input", updateThemePreview);
+    input.addEventListener("change", updateThemePreview);
+  });
+
+  [
+    document.querySelector('input[name="fontFamily"]'),
+    document.querySelector('input[name="fontSizePx"]'),
+    document.querySelector('input[name="displayOrder"][value="asc"]'),
+    document.querySelector('input[name="displayOrder"][value="desc"]')
+  ].forEach(function (input) {
+    if (!input) {
+      return;
+    }
+    input.addEventListener("input", updateThemePreview);
+    input.addEventListener("change", updateThemePreview);
+  });
+
   presetButtons.forEach(function (button) {
     button.addEventListener("click", function () {
       var presetName = button.getAttribute("data-theme-preset");
@@ -304,8 +581,11 @@ window.addEventListener("DOMContentLoaded", function () {
           input.value = preset[fieldName];
         }
       });
+      updateThemePreview();
     });
   });
+
+  updateThemePreview();
 });
 </script>`;
 }
@@ -1030,6 +1310,7 @@ export function buildSettingsPage(
   const adminBrandHtml = renderAdminBrand(`${basePath}/assets/apricot-logo.png`);
   const webAppHeadHtml = buildWebAppHead(basePath, "#f7f8f9");
   const topActionsHtml = `<a href="${basePath}/" class="admin-button admin-button--subtle">チャンネル一覧へ戻る</a>${renderAdminLogoutForm(basePath)}`;
+  const colorPreviewHtml = buildSettingsPreviewHtml(webUiSettings);
   const errorHtml = renderSettingsError(errorMessage);
   const colorFieldsHtml = renderThemeColorFields(webUiSettings);
   const presetControlsHtml = renderThemePresetControls();
@@ -1044,6 +1325,7 @@ export function buildSettingsPage(
     .replace("{{TOP_ACTIONS}}", topActionsHtml)
     .replace("{{ERROR}}", errorHtml)
     .replace("{{ACTION_URL}}", `${basePath}/settings`)
+    .replace("{{COLOR_PREVIEW}}", colorPreviewHtml)
     .replace("{{PRESET_CONTROLS}}", presetControlsHtml)
     .replace("{{FONT_FAMILY}}", escapeHtml(webUiSettings.fontFamily))
     .replace("{{FONT_SIZE_PX}}", String(webUiSettings.fontSizePx))
