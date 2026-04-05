@@ -1059,6 +1059,7 @@ var apricotRefreshInFlight = false;
 var apricotRefreshQueued = false;
 var apricotLatestRevision = ${initialRevision};
 var apricotUpdateSocket = null;
+var apricotUpdateSocketGeneration = 0;
 var apricotReconnectDelayMs = 1000;
 var apricotReconnectTimer = 0;
 var apricotHeartbeatTimer = 0;
@@ -1094,6 +1095,17 @@ function updateKnownRevision(response) {
   apricotLatestRevision = Math.max(apricotLatestRevision, revision);
 }
 
+function debugUpdateSocket(message, socketGeneration) {
+  if (typeof console !== "undefined" && typeof console.debug === "function") {
+    console.debug(
+      "[apricot-updates]",
+      apricotNormalizedUpdateChannel,
+      "gen=" + String(socketGeneration),
+      message
+    );
+  }
+}
+
 function applyMessagesMarkup(html) {
   var shell = getMessagesShell();
   if (!shell) {
@@ -1116,6 +1128,10 @@ function markSocketHealthy() {
   apricotMissedHeartbeatCount = 0;
   apricotHasIssuedDegradedRefresh = false;
   apricotLastSocketActivityAt = Date.now();
+}
+
+function isCurrentSocketGeneration(socketGeneration) {
+  return socketGeneration === apricotUpdateSocketGeneration;
 }
 
 async function refreshMessages() {
@@ -1163,7 +1179,10 @@ async function refreshMessages() {
   }
 }
 
-function handleUpdateMessage(event) {
+function handleUpdateMessage(event, socketGeneration) {
+  if (!isCurrentSocketGeneration(socketGeneration)) {
+    return;
+  }
   try {
     var payload = JSON.parse(event.data);
     var payloadType = typeof payload.type === "string" ? payload.type : "";
@@ -1203,23 +1222,50 @@ function clearHeartbeatTimer() {
   }
 }
 
-function closeUpdateSocket() {
-  if (apricotUpdateSocket && apricotUpdateSocket.readyState <= WebSocket.OPEN) {
-    apricotUpdateSocket.close();
+function closeTrackedUpdateSocket(socket, socketGeneration, reason) {
+  if (!socket || socket.readyState > WebSocket.OPEN) {
+    return;
   }
+  debugUpdateSocket("close requested: " + reason, socketGeneration);
+  socket.close();
+}
+
+function forceReconnectUpdatesSocket(reason) {
+  if (apricotIsUnloading) {
+    return;
+  }
+  var previousSocket = apricotUpdateSocket;
+  var previousGeneration = apricotUpdateSocketGeneration;
+  clearHeartbeatTimer();
+  resetHeartbeatState();
+  apricotUpdateSocket = null;
+  debugUpdateSocket("force reconnect: " + reason, previousGeneration);
+  connectUpdatesSocket();
+  closeTrackedUpdateSocket(previousSocket, previousGeneration, reason);
 }
 
 function handleHeartbeatFailure() {
   apricotMissedHeartbeatCount += 1;
+  debugUpdateSocket(
+    "heartbeat miss count=" + String(apricotMissedHeartbeatCount),
+    apricotUpdateSocketGeneration
+  );
   if (apricotMissedHeartbeatCount < apricotMissedHeartbeatLimit) {
     return;
   }
-  if (!apricotHasIssuedDegradedRefresh) {
-    apricotHasIssuedDegradedRefresh = true;
-    void refreshMessages();
+  if (apricotHasIssuedDegradedRefresh) {
     return;
   }
-  closeUpdateSocket();
+  apricotHasIssuedDegradedRefresh = true;
+  var staleSocketGeneration = apricotUpdateSocketGeneration;
+  debugUpdateSocket("degraded refresh started", staleSocketGeneration);
+  void refreshMessages().finally(function () {
+    if (!isCurrentSocketGeneration(staleSocketGeneration)) {
+      return;
+    }
+    debugUpdateSocket("degraded refresh completed", staleSocketGeneration);
+    forceReconnectUpdatesSocket("heartbeat-stale");
+  });
 }
 
 function sendHeartbeat() {
@@ -1239,9 +1285,10 @@ function sendHeartbeat() {
   apricotLastHeartbeatSentAt = Date.now();
   try {
     apricotUpdateSocket.send(JSON.stringify({ type: "ping" }));
+    debugUpdateSocket("heartbeat ping sent", apricotUpdateSocketGeneration);
   } catch (error) {
     console.error(error);
-    closeUpdateSocket();
+    forceReconnectUpdatesSocket("heartbeat-send-failed");
   }
 }
 
@@ -1262,9 +1309,10 @@ function startFallbackRefreshPoll() {
 }
 
 function scheduleReconnect() {
-  if (apricotReconnectTimer || apricotIsUnloading) {
+  if (apricotReconnectTimer || apricotIsUnloading || apricotUpdateSocket) {
     return;
   }
+  debugUpdateSocket("schedule reconnect", apricotUpdateSocketGeneration);
   apricotReconnectTimer = window.setTimeout(function () {
     apricotReconnectTimer = 0;
     connectUpdatesSocket();
@@ -1283,6 +1331,11 @@ function connectUpdatesSocket() {
     return;
   }
 
+  apricotUpdateSocketGeneration += 1;
+  var socketGeneration = apricotUpdateSocketGeneration;
+  clearHeartbeatTimer();
+  resetHeartbeatState();
+  debugUpdateSocket("connect attempt", socketGeneration);
   try {
     apricotUpdateSocket = new WebSocket(getUpdatesUrl());
   } catch (error) {
@@ -1292,14 +1345,24 @@ function connectUpdatesSocket() {
   }
 
   apricotUpdateSocket.addEventListener("open", function () {
+    if (!isCurrentSocketGeneration(socketGeneration)) {
+      return;
+    }
+    debugUpdateSocket("socket open", socketGeneration);
     clearReconnectTimer();
     apricotReconnectDelayMs = 1000;
     resetHeartbeatState();
     markSocketHealthy();
     startHeartbeatTimer();
   });
-  apricotUpdateSocket.addEventListener("message", handleUpdateMessage);
+  apricotUpdateSocket.addEventListener("message", function (event) {
+    handleUpdateMessage(event, socketGeneration);
+  });
   apricotUpdateSocket.addEventListener("close", function () {
+    debugUpdateSocket("socket close", socketGeneration);
+    if (!isCurrentSocketGeneration(socketGeneration)) {
+      return;
+    }
     clearHeartbeatTimer();
     resetHeartbeatState();
     apricotUpdateSocket = null;
@@ -1308,7 +1371,11 @@ function connectUpdatesSocket() {
     }
   });
   apricotUpdateSocket.addEventListener("error", function () {
-    closeUpdateSocket();
+    debugUpdateSocket("socket error", socketGeneration);
+    if (!isCurrentSocketGeneration(socketGeneration)) {
+      return;
+    }
+    closeTrackedUpdateSocket(apricotUpdateSocket, socketGeneration, "socket-error");
   });
 }
 
@@ -1318,7 +1385,7 @@ window.addEventListener("beforeunload", function () {
   apricotIsUnloading = true;
   clearReconnectTimer();
   clearHeartbeatTimer();
-  closeUpdateSocket();
+  closeTrackedUpdateSocket(apricotUpdateSocket, apricotUpdateSocketGeneration, "beforeunload");
 });
 
 connectUpdatesSocket();`;
