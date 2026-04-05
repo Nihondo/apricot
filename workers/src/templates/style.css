@@ -249,8 +249,9 @@ input:focus { outline: none; }
 .floating {
   -webkit-appearance: none; appearance: none;
   position: fixed;
-  right: 10px;
+  left: 50%;
   bottom: 10px;
+  transform: translateX(-50%);
   z-index: 1;
   height: 60px; width: 60px;
   font-size: 0.7em; opacity: 0.5;
