@@ -560,6 +560,7 @@ describe("createWebModule", () => {
 
     expect(html).toContain("url-embed--rich");
     expect(html).toContain("platform.twitter.com/widgets.js");
+    expect(html).toContain("twttr.widgets.load(document.body)");
     expect(html).toContain("data-apricot-rich-embed-id");
     expect(html).toContain("apricot-x-embed-resize");
   });

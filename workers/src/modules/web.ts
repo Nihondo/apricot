@@ -442,7 +442,7 @@ function escapeIframeSrcdoc(documentHtml: string): string {
 }
 
 function buildRichEmbedDocument(embed: ResolvedUrlEmbed, embedId: string): string {
-  const resizeScript = `(function () {
+  const loaderScript = `(function () {
   var embedId = ${JSON.stringify(embedId)};
   var lastHeight = 0;
   var rafId = 0;
@@ -478,6 +478,8 @@ function buildRichEmbedDocument(embed: ResolvedUrlEmbed, embedId: string): strin
     rafId = window.requestAnimationFrame(postHeight);
   }
 
+  window.__apricotSchedulePostHeight = schedulePostHeight;
+
   if (typeof ResizeObserver === "function") {
     var resizeObserver = new ResizeObserver(schedulePostHeight);
     resizeObserver.observe(document.documentElement);
@@ -500,6 +502,40 @@ function buildRichEmbedDocument(embed: ResolvedUrlEmbed, embedId: string): strin
   [0, 50, 150, 300, 600, 1000].forEach(function (delay) {
     window.setTimeout(schedulePostHeight, delay);
   });
+
+  window.twttr = (function (d, s, id) {
+    var js;
+    var firstScript = d.getElementsByTagName(s)[0];
+    var twttr = window.twttr || {};
+    if (d.getElementById(id)) {
+      return twttr;
+    }
+    js = d.createElement(s);
+    js.id = id;
+    js.src = "https://platform.twitter.com/widgets.js";
+    js.async = true;
+    if (firstScript && firstScript.parentNode) {
+      firstScript.parentNode.insertBefore(js, firstScript);
+    } else {
+      d.head.appendChild(js);
+    }
+    twttr._e = twttr._e || [];
+    twttr.ready = function (callback) {
+      twttr._e.push(callback);
+    };
+    return twttr;
+  }(document, "script", "twitter-wjs"));
+
+  window.twttr.ready(function (twttr) {
+    if (twttr.events && typeof twttr.events.bind === "function") {
+      twttr.events.bind("loaded", schedulePostHeight);
+    }
+    if (twttr.widgets && typeof twttr.widgets.load === "function") {
+      twttr.widgets.load(document.body);
+    }
+    schedulePostHeight();
+  });
+
   schedulePostHeight();
 })();`;
 
@@ -517,8 +553,7 @@ function buildRichEmbedDocument(embed: ResolvedUrlEmbed, embedId: string): strin
     "</style>",
     "</head><body>",
     embed.html ?? "",
-    `<script>${resizeScript}</script>`,
-    '<script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>',
+    `<script>${loaderScript}</script>`,
     "</body></html>",
   ].join("");
 }
