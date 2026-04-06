@@ -28,6 +28,7 @@ import {
   type WebUiSettings,
 } from "./modules/web";
 import {
+  type BrowserRenderingConfig,
   extractUrlMetadata,
   resolveUrlEmbed,
   type ResolvedUrlEmbed,
@@ -94,6 +95,7 @@ export class IrcProxyDO implements DurableObject {
   private serverConn: IrcServerConnection | null = null;
   private modules = new ModuleRegistry();
   private readonly envConfig: ProxyConfig | null;
+  private readonly browserRenderingConfig?: BrowserRenderingConfig;
   private config: ProxyConfig | null = null;
   private instanceConfig?: ProxyInstanceConfig;
   private proxyId: string | null = null;
@@ -131,6 +133,7 @@ export class IrcProxyDO implements DurableObject {
   constructor(state: DurableObjectState, env: Env) {
     this.state = state;
     this.envConfig = buildProxyConfigFromEnv(env);
+    this.browserRenderingConfig = buildBrowserRenderingConfig(env);
     this.config = this.envConfig;
     this.keepaliveMs = (parseInt(env.KEEPALIVE_INTERVAL || "60", 10)) * 1000;
     if (this.config) {
@@ -714,7 +717,9 @@ export class IrcProxyDO implements DurableObject {
       }
 
       try {
-        text = await extractUrlMetadata(body.url);
+        text = await extractUrlMetadata(body.url, {
+          browserRendering: this.browserRenderingConfig,
+        });
       } catch {
         text = body.url;
       }
@@ -2025,6 +2030,19 @@ export class IrcProxyDO implements DurableObject {
       },
     });
   }
+}
+
+function buildBrowserRenderingConfig(env: Env): BrowserRenderingConfig | undefined {
+  const accountId = env.CLOUDFLARE_ACCOUNT_ID?.trim();
+  const apiToken = env.CLOUDFLARE_BROWSER_RENDERING_API_TOKEN?.trim();
+  if (!accountId || !apiToken) {
+    return undefined;
+  }
+
+  return {
+    accountId,
+    apiToken,
+  };
 }
 
 function corsHeaders(): HeadersInit {

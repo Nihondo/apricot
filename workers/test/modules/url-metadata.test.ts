@@ -51,6 +51,110 @@ describe("url metadata resolver", () => {
     expect(metadata).not.toContain("(@catsareblessing)");
   });
 
+  it("prefers Browser Rendering titles when credentials are configured", async () => {
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "https://api.cloudflare.com/client/v4/accounts/test-account/browser-rendering/scrape") {
+        expect(init?.method).toBe("POST");
+        expect(new Headers(init?.headers).get("Authorization")).toBe("Bearer test-token");
+        expect(new Headers(init?.headers).get("Content-Type")).toBe("application/json");
+        expect(JSON.parse(String(init?.body))).toEqual({
+          url: "https://example.com/dynamic",
+          elements: [{ selector: "title" }],
+          gotoOptions: { waitUntil: "networkidle0" },
+        });
+        return Response.json({
+          success: true,
+          result: [
+            {
+              selector: "title",
+              results: [{ text: "Rendered Title" }],
+            },
+          ],
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const metadata = await extractUrlMetadata("https://example.com/dynamic", {
+      browserRendering: {
+        accountId: "test-account",
+        apiToken: "test-token",
+      },
+    });
+
+    expect(metadata).toBe("Rendered Title https://example.com/dynamic");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to static HTML titles when Browser Rendering returns no title", async () => {
+    const calledUrls: string[] = [];
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      calledUrls.push(url);
+      if (url === "https://api.cloudflare.com/client/v4/accounts/test-account/browser-rendering/scrape") {
+        return Response.json({
+          success: true,
+          result: [
+            {
+              selector: "title",
+              results: [],
+            },
+          ],
+        });
+      }
+      if (url === "https://example.com/fallback") {
+        return new Response("<html><head><title>Static Title</title></head></html>", {
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const metadata = await extractUrlMetadata("https://example.com/fallback", {
+      browserRendering: {
+        accountId: "test-account",
+        apiToken: "test-token",
+      },
+    });
+
+    expect(metadata).toBe("Static Title https://example.com/fallback");
+    expect(calledUrls).toEqual([
+      "https://api.cloudflare.com/client/v4/accounts/test-account/browser-rendering/scrape",
+      "https://example.com/fallback",
+    ]);
+  });
+
+  it("falls back to static HTML titles when Browser Rendering fails", async () => {
+    const calledUrls: string[] = [];
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      calledUrls.push(url);
+      if (url === "https://api.cloudflare.com/client/v4/accounts/test-account/browser-rendering/scrape") {
+        return new Response("error", { status: 500 });
+      }
+      if (url === "https://example.com/error-fallback") {
+        return new Response("<html><head><title>Recovered Title</title></head></html>", {
+          headers: { "Content-Type": "text/html; charset=utf-8" },
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const metadata = await extractUrlMetadata("https://example.com/error-fallback", {
+      browserRendering: {
+        accountId: "test-account",
+        apiToken: "test-token",
+      },
+    });
+
+    expect(metadata).toBe("Recovered Title https://example.com/error-fallback");
+    expect(calledUrls).toEqual([
+      "https://api.cloudflare.com/client/v4/accounts/test-account/browser-rendering/scrape",
+      "https://example.com/error-fallback",
+    ]);
+  });
+
   it("resolves X URLs as rich embeds and includes the configured theme", async () => {
     fetchMock.mockImplementation(async (input) => {
       const url = String(input);
@@ -240,6 +344,54 @@ describe("url metadata resolver", () => {
 
   it("allows public IPv6 preview URLs", () => {
     expect(isAllowedPreviewUrl("https://[2001:4860:4860::8888]/test")).toBe(true);
+  });
+
+  it("uses static HTML titles when Browser Rendering credentials are not configured", async () => {
+    fetchMock.mockResolvedValue(new Response(
+      "<html><head><title>Static Only Title</title></head></html>",
+      { headers: { "Content-Type": "text/html; charset=utf-8" } },
+    ));
+
+    const metadata = await extractUrlMetadata("https://example.com/static-only");
+
+    expect(metadata).toBe("Static Only Title https://example.com/static-only");
+    expect(fetchMock).toHaveBeenCalledWith("https://example.com/static-only", expect.any(Object));
+  });
+
+  it("does not call Browser Rendering for X URLs even when credentials are configured", async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      expect(url).not.toContain("/browser-rendering/scrape");
+      if (url.startsWith("https://publish.x.com/oembed")) {
+        return Response.json({
+          author_name: "Example",
+          html: "<blockquote><p>Hello world&mdash; Example (@example) April 4, 2026</p></blockquote>",
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const metadata = await extractUrlMetadata("https://x.com/example/status/1", {
+      browserRendering: {
+        accountId: "test-account",
+        apiToken: "test-token",
+      },
+    });
+
+    expect(metadata).toContain("XユーザーのExampleさん");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not fetch Browser Rendering or HTML for blocked URLs", async () => {
+    const metadata = await extractUrlMetadata("http://localhost/test", {
+      browserRendering: {
+        accountId: "test-account",
+        apiToken: "test-token",
+      },
+    });
+
+    expect(metadata).toBe("http://localhost/test");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("does not fetch blocked preview URLs from message text", async () => {

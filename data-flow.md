@@ -600,7 +600,7 @@ web module: buildTextMessage()
 resolveUrlEmbed(url, { xTheme })
   ├─ 直リンク画像 → { kind: "image", imageUrl }
   ├─ YouTube → oEmbed + サムネイルで { kind: "card" }
-  ├─ X/Twitter → publish.twitter.com oEmbed を取得
+  ├─ X/Twitter → publish.x.com oEmbed を取得
   │    ├─ クエリ: omit_script=1, maxwidth=355, maxheight=200, theme=light|dark
   │    ├─ html あり → { kind: "rich", html, title, description }
   │    └─ html なし → { kind: "card", title, description }
@@ -678,16 +678,35 @@ srcdoc 内
 
 ### REST API の URL 投稿
 
-`POST /api/post` に `url` が渡された場合も同じ preview 解決器を使います。
+`POST /api/post` に `url` が渡された場合、Web UI 保存用の preview 解決と、IRC に実際に流す投稿テキスト生成は別経路で処理します。
 
 ```
 POST /api/post { channel, url }
       │
       ├─ resolveUrlEmbed(url, { xTheme: resolveXEmbedTheme(webUiSettings.surfaceColor) })
-      └─ extractUrlMetadata(url) で IRC 投稿用テキストを生成
+      │    └─ Web UI ログ保存用の embed を生成
+      └─ extractUrlMetadata(url, { browserRendering })
+           └─ IRC 投稿用テキストを生成
 ```
 
-このため、Web UI から URL 単体投稿した場合も、保存済みテーマに合わせた X rich embed が message log に残ります。
+`extractUrlMetadata()` の内部優先順位は次のとおりです。
+
+```
+extractUrlMetadata(url, { browserRendering })
+  ├─ 非許可 URL → URL をそのまま返す
+  ├─ X/Twitter URL → 既存どおり oEmbed で本文・著者名を組み立てる
+  └─ その他 URL
+       ├─ browserRendering 設定あり
+       │    └─ Cloudflare Browser Rendering /scrape
+       │         ├─ selector: "title"
+       │         ├─ gotoOptions.waitUntil = "networkidle0"
+       │         └─ result[0].results[0].text をタイトルとして採用
+       ├─ Browser Rendering が未設定 / 空結果 / 失敗
+       │    └─ 従来どおり静的 HTML の <title> 抽出へフォールバック
+       └─ どちらでも取得できない → URL をそのまま返す
+```
+
+このため、Web UI から URL 単体投稿した場合も、保存済みテーマに合わせた X rich embed は message log に残りつつ、一般 URL の IRC 投稿文だけは Cloudflare Browser Rendering のシークレット設定があればレンダリング後タイトルを優先できるようになっています。
 
 ---
 

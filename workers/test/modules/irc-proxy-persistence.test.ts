@@ -1293,6 +1293,43 @@ describe("IrcProxyDO web log persistence", () => {
     });
   });
 
+  it("passes Browser Rendering credentials to URL title extraction for API url posts", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({
+        CLOUDFLARE_ACCOUNT_ID: "account-123",
+        CLOUDFLARE_BROWSER_RENDERING_API_TOKEN: "token-xyz",
+      })
+    );
+    await state.initPromise;
+
+    const send = vi.fn().mockResolvedValue(undefined);
+    (proxy as any).serverConn = {
+      connected: true,
+      send,
+    };
+    (proxy as any).nick = "apricot";
+    extractUrlMetadataMock.mockResolvedValue("Rendered title https://example.com/post");
+    resolveUrlEmbedMock.mockResolvedValue(undefined);
+
+    const response = await proxy.fetch(new Request("https://example.com/api/post", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ channel: "#general", url: "https://example.com/post" }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(extractUrlMetadataMock).toHaveBeenCalledWith("https://example.com/post", {
+      browserRendering: {
+        accountId: "account-123",
+        apiToken: "token-xyz",
+      },
+    });
+  });
+
   it("clears the cookie on logout", async () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(

@@ -41,8 +41,32 @@ interface HtmlMetadata {
   finalUrl: string;
 }
 
+/**
+ * Cloudflare Browser Rendering credentials for rendered title extraction.
+ */
+export interface BrowserRenderingConfig {
+  accountId: string;
+  apiToken: string;
+}
+
+/**
+ * Options for URL title extraction.
+ */
+export interface ExtractUrlMetadataOptions {
+  browserRendering?: BrowserRenderingConfig;
+}
+
 interface ResolveUrlEmbedOptions {
   xTheme?: XEmbedTheme;
+}
+
+interface BrowserRenderingScrapeResponse {
+  result?: Array<{
+    selector?: string;
+    results?: Array<{
+      text?: string;
+    }>;
+  }>;
 }
 
 function isPrivateIpv4(hostname: string): boolean {
@@ -107,7 +131,10 @@ export function isAllowedPreviewUrl(url: string): boolean {
  * - Other URLs: fetches HTML and extracts <title>
  * - Fallback: returns the URL as-is
  */
-export async function extractUrlMetadata(url: string): Promise<string> {
+export async function extractUrlMetadata(
+  url: string,
+  options: ExtractUrlMetadataOptions = {},
+): Promise<string> {
   if (!isAllowedPreviewUrl(url)) {
     return url;
   }
@@ -115,7 +142,7 @@ export async function extractUrlMetadata(url: string): Promise<string> {
     if (X_URL_RE.test(url)) {
       return await extractTwitterMetadata(url);
     }
-    return await extractPageTitle(url);
+    return await extractPageTitle(url, options.browserRendering);
   } catch {
     return url;
   }
@@ -191,7 +218,15 @@ async function extractTwitterMetadata(url: string): Promise<string> {
   return truncate(`${authorName} / X ${url}`);
 }
 
-async function extractPageTitle(url: string): Promise<string> {
+async function extractPageTitle(
+  url: string,
+  browserRendering?: BrowserRenderingConfig,
+): Promise<string> {
+  const renderedTitle = await extractRenderedPageTitle(url, browserRendering);
+  if (renderedTitle) {
+    return truncate(`${renderedTitle} ${url}`);
+  }
+
   const metadata = await fetchHtmlMetadata(url);
   if (!metadata) {
     return url;
@@ -203,6 +238,45 @@ async function extractPageTitle(url: string): Promise<string> {
   }
 
   return url;
+}
+
+async function extractRenderedPageTitle(
+  url: string,
+  browserRendering?: BrowserRenderingConfig,
+): Promise<string | undefined> {
+  const accountId = browserRendering?.accountId.trim();
+  const apiToken = browserRendering?.apiToken.trim();
+  if (!accountId || !apiToken) {
+    return undefined;
+  }
+
+  const apiUrl = `https://api.cloudflare.com/client/v4/accounts/${accountId}/browser-rendering/scrape`;
+
+  try {
+    const response = await fetch(apiUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiToken}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        url,
+        elements: [{ selector: "title" }],
+        gotoOptions: { waitUntil: "networkidle0" },
+      }),
+      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      return undefined;
+    }
+
+    const payload = await response.json() as BrowserRenderingScrapeResponse;
+    const titleText = payload.result?.[0]?.results?.[0]?.text;
+    return cleanMetadataText(titleText);
+  } catch {
+    return undefined;
+  }
 }
 
 function resolveDirectImageEmbed(url: string): ResolvedUrlEmbed | undefined {

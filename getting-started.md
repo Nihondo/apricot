@@ -224,6 +224,7 @@ Bob   → /proxy/bob/web/      ← プロキシ ID: bob
 ### URL をシェアするとプレビューが付く
 
 `POST /api/post` で `message` の代わりに `url` を指定すると、ページタイトルを自動取得して投稿します。
+`CLOUDFLARE_ACCOUNT_ID` と `CLOUDFLARE_BROWSER_RENDERING_API_TOKEN` を設定すると、動的なサイトでもレンダリング後のタイトルを優先して取得できます。
 
 ```bash
 curl -X POST http://localhost:8787/proxy/myproxy/api/post \
@@ -250,7 +251,11 @@ npx wrangler login
 npx wrangler secret put API_KEY
 npx wrangler secret put CLIENT_PASSWORD
 
-# 3. デプロイ
+# 3. 必要なら URL タイトル取得用のシークレットも設定
+npx wrangler secret put CLOUDFLARE_ACCOUNT_ID
+npx wrangler secret put CLOUDFLARE_BROWSER_RENDERING_API_TOKEN
+
+# 4. デプロイ
 npm run deploy
 ```
 
@@ -328,6 +333,8 @@ curl -X POST https://your-apricot.workers.dev/proxy/bot/api/post \
 | `TIMEZONE_OFFSET` | ─ | `9` | タイムゾーンオフセット |
 | `WEB_LOG_MAX_LINES` | ─ | `200` | ログ保持件数 |
 | `API_KEY` | ✅ | ─ | API 認証キー |
+| `CLOUDFLARE_ACCOUNT_ID` | ─ | ─ | URL 投稿時に Browser Rendering を使う Cloudflare アカウント ID |
+| `CLOUDFLARE_BROWSER_RENDERING_API_TOKEN` | ─ | ─ | URL 投稿時に Browser Rendering を使う API トークン |
 
 ---
 
