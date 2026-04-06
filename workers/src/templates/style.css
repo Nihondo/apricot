@@ -138,11 +138,17 @@ a:hover { text-decoration: underline; }
   padding: 0;
   overflow: hidden;
 }
-.url-embed__frame {
+.url-embed__rich-content {
   display: block;
   width: 100%;
-  border: none;
   background: transparent;
+}
+.url-embed__rich-content iframe {
+  max-width: 100% !important;
+}
+.url-embed__rich-content .twitter-tweet,
+.url-embed__rich-content .twitter-tweet-rendered {
+  margin: 0 !important;
 }
 .url-embed__image {
   display: block;

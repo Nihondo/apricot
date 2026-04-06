@@ -119,8 +119,6 @@ export const DEFAULT_WEB_UI_SETTINGS: WebUiSettings = {
 const SETTINGS_PREVIEW_CHANNEL_NAME = "#preview";
 const SETTINGS_PREVIEW_TOPIC = "配色プレビュー";
 const SETTINGS_PREVIEW_MESSAGE_VALUE = "送信テキストの見本";
-const X_EMBED_HEIGHT_MESSAGE_TYPE = "apricot-x-embed-resize";
-const X_EMBED_INITIAL_HEIGHT_PX = 160;
 const X_EMBED_DARK_THEME_LUMINANCE_THRESHOLD = 128;
 const SETTINGS_PREVIEW_SELF_NICK = "apricot";
 const SETTINGS_PREVIEW_HIGHLIGHT_KEYWORDS = ["重要ワード"];
@@ -441,153 +439,23 @@ function escapeIframeSrcdoc(documentHtml: string): string {
   return escapeHtml(documentHtml);
 }
 
-function buildRichEmbedDocument(embed: ResolvedUrlEmbed, embedId: string): string {
-  const loaderScript = `(function () {
-  var embedId = ${JSON.stringify(embedId)};
-  var lastHeight = 0;
-  var rafId = 0;
-
-  function calculateHeight() {
-    var root = document.documentElement;
-    var body = document.body;
-    return Math.max(
-      root ? root.scrollHeight : 0,
-      root ? root.offsetHeight : 0,
-      body ? body.scrollHeight : 0,
-      body ? body.offsetHeight : 0,
-      body ? body.clientHeight : 0
-    );
-  }
-
-  function postHeight() {
-    rafId = 0;
-    var nextHeight = Math.max(1, Math.ceil(calculateHeight()));
-    if (nextHeight === lastHeight) {
-      return;
-    }
-    lastHeight = nextHeight;
-    if (window.parent && window.parent !== window) {
-      window.parent.postMessage({ type: ${JSON.stringify(X_EMBED_HEIGHT_MESSAGE_TYPE)}, embedId: embedId, height: nextHeight }, "*");
-    }
-  }
-
-  function schedulePostHeight() {
-    if (rafId) {
-      return;
-    }
-    rafId = window.requestAnimationFrame(postHeight);
-  }
-
-  window.__apricotSchedulePostHeight = schedulePostHeight;
-
-  if (typeof ResizeObserver === "function") {
-    var resizeObserver = new ResizeObserver(schedulePostHeight);
-    resizeObserver.observe(document.documentElement);
-    if (document.body) {
-      resizeObserver.observe(document.body);
-    }
-  }
-
-  if (typeof MutationObserver === "function") {
-    var mutationObserver = new MutationObserver(schedulePostHeight);
-    mutationObserver.observe(document.documentElement, {
-      subtree: true,
-      childList: true,
-      attributes: true,
-      characterData: true
-    });
-  }
-
-  window.addEventListener("load", schedulePostHeight);
-  [0, 50, 150, 300, 600, 1000].forEach(function (delay) {
-    window.setTimeout(schedulePostHeight, delay);
-  });
-
-  window.twttr = (function (d, s, id) {
-    var js;
-    var firstScript = d.getElementsByTagName(s)[0];
-    var twttr = window.twttr || {};
-    if (d.getElementById(id)) {
-      return twttr;
-    }
-    js = d.createElement(s);
-    js.id = id;
-    js.src = "https://platform.twitter.com/widgets.js";
-    js.async = true;
-    if (firstScript && firstScript.parentNode) {
-      firstScript.parentNode.insertBefore(js, firstScript);
-    } else {
-      d.head.appendChild(js);
-    }
-    twttr._e = twttr._e || [];
-    twttr.ready = function (callback) {
-      twttr._e.push(callback);
-    };
-    return twttr;
-  }(document, "script", "twitter-wjs"));
-
-  window.twttr.ready(function (twttr) {
-    if (twttr.events && typeof twttr.events.bind === "function") {
-      twttr.events.bind("loaded", schedulePostHeight);
-    }
-    if (twttr.widgets && typeof twttr.widgets.load === "function") {
-      twttr.widgets.load(document.body);
-    }
-    schedulePostHeight();
-  });
-
-  schedulePostHeight();
-})();`;
-
-  return [
-    "<!DOCTYPE html>",
-    "<html><head>",
-    '<meta charset="utf-8">',
-    '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    '<base target="_blank">',
-    "<style>",
-    "html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }",
-    "body { display: flex; justify-content: center; }",
-    ".twitter-tweet, .twitter-tweet-rendered { margin: 0 !important; }",
-    "iframe { max-width: 100% !important; }",
-    "</style>",
-    "</head><body>",
-    embed.html ?? "",
-    `<script>${loaderScript}</script>`,
-    "</body></html>",
-  ].join("");
-}
-
-function renderRichEmbedFrame(
+function renderRichEmbedMarkup(
   embed: ResolvedUrlEmbed,
   variant: "inline" | "popup",
-  embedId: string,
 ): string {
   const baseClass = variant === "inline" ? "url-embed url-embed--inline" : "url-embed url-embed--popup";
-  const sandbox = variant === "inline"
-    ? "allow-scripts allow-popups allow-popups-to-escape-sandbox"
-    : "allow-scripts";
-  const frameTitle = embed.title ?? "Xの投稿";
   return `<div class="${baseClass} url-embed--rich">
-    <iframe
-      class="url-embed__frame"
-      title="${escapeHtml(frameTitle)}"
-      loading="lazy"
-      sandbox="${sandbox}"
-      scrolling="no"
-      data-apricot-rich-embed-id="${escapeHtml(embedId)}"
-      style="height:${X_EMBED_INITIAL_HEIGHT_PX}px"
-      srcdoc="${escapeIframeSrcdoc(buildRichEmbedDocument(embed, embedId))}"
-    ></iframe>
+    <div class="url-embed__rich-content" data-apricot-rich-embed>
+      ${embed.html ?? ""}
+    </div>
   </div>`;
 }
 
 function renderRichEmbedTemplate(
   embed: ResolvedUrlEmbed,
   templateId: string,
-  embedId: string,
 ): string {
-  return `<template id="${escapeHtml(templateId)}">${renderRichEmbedFrame(embed, "popup", embedId)}</template>`;
+  return `<template id="${escapeHtml(templateId)}">${renderRichEmbedMarkup(embed, "popup")}</template>`;
 }
 
 function buildSettingsPreviewHtml(webUiSettings: WebUiSettings): string {
@@ -853,10 +721,10 @@ function renderEmbedDataAttributes(embed: ResolvedUrlEmbed, previewTemplateId?: 
 function renderUrlEmbed(
   embed: ResolvedUrlEmbed,
   variant: "inline" | "popup",
-  embedId: string,
+  _embedId: string,
 ): string {
   if (embed.kind === "rich" && embed.html) {
-    return renderRichEmbedFrame(embed, variant, embedId);
+    return renderRichEmbedMarkup(embed, variant);
   }
 
   const baseClass = variant === "inline" ? "url-embed url-embed--inline" : "url-embed url-embed--popup";
@@ -886,7 +754,9 @@ function renderUrlEmbed(
 
 function buildRichEmbedScript(): string {
   return `window.__apricotRichEmbedState = window.__apricotRichEmbedState || {
-  initialized: false
+  initialized: false,
+  loaderRequested: false,
+  pendingRoots: []
 };
 
 window.initializeApricotRichEmbeds = window.initializeApricotRichEmbeds || function initializeApricotRichEmbeds() {
@@ -896,23 +766,72 @@ window.initializeApricotRichEmbeds = window.initializeApricotRichEmbeds || funct
   }
   state.initialized = true;
 
-  window.addEventListener("message", function (event) {
-    var data = event.data;
-    if (!data || data.type !== ${JSON.stringify(X_EMBED_HEIGHT_MESSAGE_TYPE)} || typeof data.embedId !== "string" || typeof data.height !== "number") {
+  function flushPendingRoots() {
+    if (!window.twttr || !window.twttr.widgets || typeof window.twttr.widgets.load !== "function") {
       return;
     }
-    var frame = document.querySelector('iframe[data-apricot-rich-embed-id="' + data.embedId + '"]');
-    if (!(frame instanceof HTMLIFrameElement)) {
+    while (state.pendingRoots.length > 0) {
+      var root = state.pendingRoots.shift();
+      if (root instanceof Element || root instanceof Document || root === document.body) {
+        window.twttr.widgets.load(root);
+      }
+    }
+  }
+
+  function requestLoader() {
+    if (state.loaderRequested) {
       return;
     }
-    frame.style.height = Math.max(1, Math.ceil(data.height)) + "px";
-    window.dispatchEvent(new CustomEvent("apricot-rich-embed-resized", {
-      detail: { embedId: data.embedId }
-    }));
-  });
+    state.loaderRequested = true;
+    window.twttr = (function (d, s, id) {
+      var js;
+      var firstScript = d.getElementsByTagName(s)[0];
+      var twttr = window.twttr || {};
+      if (d.getElementById(id)) {
+        return twttr;
+      }
+      js = d.createElement(s);
+      js.id = id;
+      js.src = "https://platform.twitter.com/widgets.js";
+      js.async = true;
+      if (firstScript && firstScript.parentNode) {
+        firstScript.parentNode.insertBefore(js, firstScript);
+      } else {
+        d.head.appendChild(js);
+      }
+      twttr._e = twttr._e || [];
+      twttr.ready = function (callback) {
+        twttr._e.push(callback);
+      };
+      return twttr;
+    }(document, "script", "twitter-wjs"));
+
+    window.twttr.ready(function (twttr) {
+      if (twttr.events && typeof twttr.events.bind === "function") {
+        twttr.events.bind("loaded", function () {
+          window.dispatchEvent(new CustomEvent("apricot-rich-embed-loaded"));
+        });
+      }
+      flushPendingRoots();
+    });
+  }
+
+  window.apricotRefreshRichEmbeds = function apricotRefreshRichEmbeds(root) {
+    var targetRoot = root || document.body;
+    if (!targetRoot || !(targetRoot instanceof Element || targetRoot instanceof Document || targetRoot === document.body)) {
+      return;
+    }
+    if (!targetRoot.querySelector || !targetRoot.querySelector("[data-apricot-rich-embed]")) {
+      return;
+    }
+    state.pendingRoots.push(targetRoot);
+    requestLoader();
+    flushPendingRoots();
+  };
 };
 
-window.initializeApricotRichEmbeds();`;
+window.initializeApricotRichEmbeds();
+window.apricotRefreshRichEmbeds(document.body);`;
 }
 
 function buildPreviewScript(): string {
@@ -980,6 +899,9 @@ window.initializeApricotPreview = window.initializeApricotPreview || function in
       popupParts.popupRich.appendChild(template.content.cloneNode(true));
       popupParts.popupRich.hidden = false;
       popupParts.popup.classList.remove("url-preview-popup--card");
+      if (typeof window.apricotRefreshRichEmbeds === "function") {
+        window.apricotRefreshRichEmbeds(popupParts.popupRich);
+      }
       return true;
     }
     popupParts.popupEmbed.hidden = false;
@@ -1138,7 +1060,7 @@ window.initializeApricotPreview = window.initializeApricotPreview || function in
 
   window.addEventListener("scroll", hidePopup, { passive: true });
   window.addEventListener("resize", hidePopup);
-  window.addEventListener("apricot-rich-embed-resized", function () {
+  window.addEventListener("apricot-rich-embed-loaded", function () {
     if (state.activeLink) {
       positionPopup(state.activeLink);
     }
@@ -1374,6 +1296,9 @@ function applyMessagesMarkup(html) {
     return;
   }
   shell.innerHTML = html;
+  if (typeof window.apricotRefreshRichEmbeds === "function") {
+    window.apricotRefreshRichEmbeds(shell);
+  }
   if (typeof window.initializeApricotPreview === "function") {
     window.initializeApricotPreview();
   }
@@ -1736,7 +1661,7 @@ function renderMessage(
       ? `<div class="url-embed-container">${renderUrlEmbed(m.embed, "inline", `inline-${renderKey}`)}</div>`
       : "";
   const popupTemplateHtml = popupTemplateId && m.embed?.kind === "rich" && m.embed.html
-    ? renderRichEmbedTemplate(m.embed, popupTemplateId, `popup-${renderKey}`)
+    ? renderRichEmbedTemplate(m.embed, popupTemplateId)
     : "";
   let messageHtml: string;
 

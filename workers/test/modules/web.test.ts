@@ -254,8 +254,11 @@ describe("createWebModule", () => {
       "apricot",
       buildWebUiSettings({ displayOrder: "desc" })
     );
-    const firstIdx = html.indexOf("first");
-    const secondIdx = html.indexOf("second");
+    const shellStart = html.indexOf('<div id="channel-messages-shell">');
+    const shellEnd = html.indexOf("</div><button", shellStart);
+    const messagesMarkup = html.slice(shellStart, shellEnd);
+    const firstIdx = messagesMarkup.indexOf("first");
+    const secondIdx = messagesMarkup.indexOf("second");
     expect(secondIdx).toBeLessThan(firstIdx); // 新しい順（secondが上）
     expect(html).toContain("再読込");
     expect(html).not.toContain("nearBottomThreshold = 48");
@@ -559,10 +562,11 @@ describe("createWebModule", () => {
     );
 
     expect(html).toContain("url-embed--rich");
+    expect(html).toContain("data-apricot-rich-embed");
+    expect(html).toContain("<blockquote class=\"twitter-tweet\"><p>post body</p></blockquote>");
     expect(html).toContain("platform.twitter.com/widgets.js");
-    expect(html).toContain("twttr.widgets.load(document.body)");
-    expect(html).toContain("data-apricot-rich-embed-id");
-    expect(html).toContain("apricot-x-embed-resize");
+    expect(html).toContain("window.twttr.widgets.load(root)");
+    expect(html).toContain("window.apricotRefreshRichEmbeds");
   });
 
   it("renders popup templates for rich X URL embeds when inline preview is disabled", async () => {
