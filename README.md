@@ -237,6 +237,16 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/post \
   -d '{"channel": "#general", "message": "Hello from API!"}'
 ```
 
+#### Chrome 拡張から現在ページを投稿する
+
+`ChromeExtension/` 配下に、現在開いているページのタイトルと URL を `message` として送る Chrome 拡張のサンプルを含めています。`url` モードは使わず、拡張側で `タイトル URL >選択テキスト 追加メッセージ` を組み立てて `POST /proxy/:id/api/post` へ送信します。
+
+1. Chrome の `chrome://extensions/` を開く
+2. 「デベロッパー モード」を有効にする
+3. 「パッケージ化されていない拡張機能を読み込む」から [ChromeExtension](/Users/nihondo/Library/CloudStorage/Dropbox/Projects.localized/apricot/ChromeExtension) を選ぶ
+4. Popup で `apricot URL`、`Proxy ID`、`Channel`、`API Key` を設定する
+5. 投稿先ページを開いた状態で拡張を開き、「投稿」を押す
+
 #### URL のメタデータを取得して投稿する
 
 `message` の代わりに `url` を指定すると、ページタイトルを取得して投稿します。Web UI では、同じ URL から画像 / カードプレビューも保存されます:

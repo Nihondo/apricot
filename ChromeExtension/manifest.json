@@ -1,0 +1,29 @@
+{
+  "manifest_version": 3,
+  "name": "apricot Post Message",
+  "version": "0.1.0",
+  "description": "現在のページのタイトルとURLを apricot API 経由で IRC に投稿する Chrome 拡張",
+  "permissions": [
+    "activeTab",
+    "clipboardWrite",
+    "scripting",
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "apricot Post Message",
+    "default_icon": {
+      "16": "assets/apricot_app_icon.png",
+      "48": "assets/apricot_app_icon.png",
+      "128": "assets/apricot_app_icon.png"
+    }
+  },
+  "icons": {
+    "16": "assets/apricot_app_icon.png",
+    "48": "assets/apricot_app_icon.png",
+    "128": "assets/apricot_app_icon.png"
+  }
+}

@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>apricot Post Message</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <main class="container">
+    <header class="popup-header">
+      <img class="popup-logo" src="assets/apricot_logo.png" alt="apricot">
+      <h1>apricot Post</h1>
+    </header>
+
+    <section class="panel">
+      <h2>接続設定</h2>
+
+      <div class="form-group">
+        <label for="apiBaseUrl">apricot URL</label>
+        <input type="url" id="apiBaseUrl" placeholder="https://example.workers.dev">
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="proxyId">Proxy ID</label>
+          <input type="text" id="proxyId" placeholder="myproxy">
+        </div>
+
+        <div class="form-group">
+          <label for="channel">Channel</label>
+          <input type="text" id="channel" placeholder="#general">
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="apiKey">API Key</label>
+        <input type="password" id="apiKey" placeholder="Bearer に使う API キー">
+      </div>
+
+      <button id="saveButton" class="secondary-button" type="button">設定を保存</button>
+    </section>
+
+    <section class="panel">
+      <h2>投稿内容</h2>
+
+      <div class="form-group">
+        <label for="pageInfo">ページ情報</label>
+        <input type="text" id="pageInfo" readonly>
+      </div>
+
+      <div class="form-group">
+        <label for="selectedText">選択テキスト</label>
+        <textarea id="selectedText" rows="3" placeholder="選択テキストがあれば表示されます"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="additionalText">追加メッセージ</label>
+        <textarea id="additionalText" rows="3" placeholder="補足コメントを入力"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label for="messagePreview">送信プレビュー</label>
+        <textarea id="messagePreview" rows="4" readonly></textarea>
+      </div>
+
+      <div class="button-group">
+        <button id="copyButton" class="secondary-button" type="button">コピー</button>
+        <button id="postButton" class="primary-button" type="button">投稿</button>
+      </div>
+    </section>
+
+    <div id="status" class="status" aria-live="polite"></div>
+  </main>
+
+  <script src="popup.js"></script>
+</body>
+</html>
