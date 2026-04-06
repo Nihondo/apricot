@@ -1060,6 +1060,7 @@ var apricotRefreshQueued = false;
 var apricotLatestRevision = ${initialRevision};
 var apricotUpdateSocket = null;
 var apricotUpdateSocketGeneration = 0;
+var apricotShouldForceRefreshOnNextChannelUpdate = false;
 var apricotReconnectDelayMs = 1000;
 var apricotReconnectTimer = 0;
 var apricotHeartbeatTimer = 0;
@@ -1087,9 +1088,13 @@ function getUpdatesUrl() {
   return protocol + "//" + window.location.host + path;
 }
 
+function isValidRevision(revision) {
+  return Number.isFinite(revision) && revision > 0;
+}
+
 function updateKnownRevision(response) {
   var revision = Number(response.headers.get("X-Apricot-Channel-Revision") || "0");
-  if (!Number.isFinite(revision) || revision <= 0) {
+  if (!isValidRevision(revision)) {
     return;
   }
   apricotLatestRevision = Math.max(apricotLatestRevision, revision);
@@ -1196,7 +1201,17 @@ function handleUpdateMessage(event, socketGeneration) {
     }
     markSocketHealthy();
     var revision = Number(payload.revision || "0");
-    if (Number.isFinite(revision) && revision > 0) {
+    if (apricotShouldForceRefreshOnNextChannelUpdate) {
+      apricotShouldForceRefreshOnNextChannelUpdate = false;
+      apricotLatestRevision = isValidRevision(revision) ? revision : 0;
+      debugUpdateSocket(
+        "force refresh after reconnect revision=" + String(apricotLatestRevision),
+        socketGeneration
+      );
+      void refreshMessages();
+      return;
+    }
+    if (isValidRevision(revision)) {
       if (revision <= apricotLatestRevision) {
         return;
       }
@@ -1333,6 +1348,7 @@ function connectUpdatesSocket() {
 
   apricotUpdateSocketGeneration += 1;
   var socketGeneration = apricotUpdateSocketGeneration;
+  apricotShouldForceRefreshOnNextChannelUpdate = socketGeneration > 1;
   clearHeartbeatTimer();
   resetHeartbeatState();
   debugUpdateSocket("connect attempt", socketGeneration);

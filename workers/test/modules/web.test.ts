@@ -206,6 +206,7 @@ describe("createWebModule", () => {
     expect(html).toContain("/messages/fragment");
     expect(html).toContain("/updates");
     expect(html).toContain("var apricotUpdateSocketGeneration = 0");
+    expect(html).toContain("var apricotShouldForceRefreshOnNextChannelUpdate = false");
     expect(html).toContain("var apricotHeartbeatIntervalMs = 30000");
     expect(html).toContain("var apricotMissedHeartbeatLimit = 2");
     expect(html).toContain("function markSocketHealthy()");
@@ -216,9 +217,14 @@ describe("createWebModule", () => {
     expect(html).toContain("apricotHasIssuedDegradedRefresh = true;");
     expect(html).toContain('forceReconnectUpdatesSocket("heartbeat-stale")');
     expect(html).toContain("if (!isCurrentSocketGeneration(socketGeneration)) {");
+    expect(html).toContain("function isValidRevision(revision)");
+    expect(html).toContain("if (apricotShouldForceRefreshOnNextChannelUpdate) {");
+    expect(html).toContain("apricotLatestRevision = isValidRevision(revision) ? revision : 0;");
+    expect(html).toContain('"force refresh after reconnect revision=" + String(apricotLatestRevision)');
     expect(html).toContain('debugUpdateSocket("degraded refresh started"');
     expect(html).toContain('debugUpdateSocket("force reconnect: " + reason');
     expect(html).toContain('debugUpdateSocket("socket open"');
+    expect(html).toContain("apricotShouldForceRefreshOnNextChannelUpdate = socketGeneration > 1;");
     expect(html).toContain("function startFallbackRefreshPoll()");
     expect(html).toContain("Heartbeat 導入により現状は未使用。将来の運用切替用に保持している。");
     expect(html).not.toContain("startFallbackRefreshPoll();");
