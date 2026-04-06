@@ -202,6 +202,7 @@ a:hover { text-decoration: underline; }
   pointer-events: none;
 }
 .url-preview-popup[hidden] { display: none; }
+.url-preview-popup [hidden] { display: none !important; }
 .url-preview-popup__rich[hidden] {
   display: none;
 }
