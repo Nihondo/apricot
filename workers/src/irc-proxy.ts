@@ -21,6 +21,7 @@ import {
   DEFAULT_WEB_UI_SETTINGS,
   LIGHT_WEB_UI_COLOR_PRESET,
   isWebDisplayOrder,
+  resolveXEmbedTheme,
   sanitizeStoredCustomCss,
   type PersistedWebLogs,
   type WebUiColorSettings,
@@ -149,6 +150,7 @@ export class IrcProxyDO implements DurableObject {
         this.handleChannelLogsChanged(channels);
       },
       this.config?.enableRemoteUrlPreview ?? false,
+      () => this.webUiSettings,
     );
 
     // Module registration order matters for QUIT/NICK:
@@ -704,7 +706,9 @@ export class IrcProxyDO implements DurableObject {
     // URL metadata extraction mode
     if (!text && body.url) {
       try {
-        embed = await resolveUrlEmbed(body.url);
+        embed = await resolveUrlEmbed(body.url, {
+          xTheme: resolveXEmbedTheme(this.webUiSettings.surfaceColor),
+        });
       } catch {
         embed = undefined;
       }

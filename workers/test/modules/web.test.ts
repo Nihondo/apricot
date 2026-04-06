@@ -533,13 +533,14 @@ describe("createWebModule", () => {
     expect(onChannelLogsChanged).toHaveBeenNthCalledWith(2, ["#general"]);
   });
 
-  it("renders text-only URL embeds for X previews", async () => {
+  it("renders rich X URL embeds inline when the setting is enabled", async () => {
     resolveMessageEmbedMock.mockResolvedValue({
-      kind: "card",
+      kind: "rich",
       sourceUrl: "https://x.com/example/status/1",
       siteName: "X",
       title: "Xユーザーのexampleさん",
       description: "post body",
+      html: "<blockquote class=\"twitter-tweet\"><p>post body</p></blockquote>",
     });
     const web = createWebModule(new Map(), 0, undefined, 200, undefined, true);
     const ctx = makeContext();
@@ -557,10 +558,41 @@ describe("createWebModule", () => {
       buildWebUiSettings({ enableInlineUrlPreview: true })
     );
 
-    expect(html).toContain("url-embed--text-only");
-    expect(html).toContain("Xユーザーのexampleさん");
-    expect(html).toContain("post body");
-    expect(html).not.toContain('src="undefined"');
+    expect(html).toContain("url-embed--rich");
+    expect(html).toContain("platform.twitter.com/widgets.js");
+    expect(html).toContain("data-apricot-rich-embed-id");
+    expect(html).toContain("apricot-x-embed-resize");
+  });
+
+  it("renders popup templates for rich X URL embeds when inline preview is disabled", async () => {
+    resolveMessageEmbedMock.mockResolvedValue({
+      kind: "rich",
+      sourceUrl: "https://x.com/example/status/1",
+      siteName: "X",
+      title: "Xユーザーのexampleさん",
+      description: "post body",
+      html: "<blockquote class=\"twitter-tweet\"><p>post body</p></blockquote>",
+    });
+    const web = createWebModule(new Map(), 0, undefined, 200, undefined, true);
+    const ctx = makeContext();
+
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "look https://x.com/example/status/1"],
+    });
+
+    const html = web.buildChannelMessagesPage(
+      "#general",
+      "",
+      "apricot",
+      buildWebUiSettings({ enableInlineUrlPreview: false })
+    );
+
+    expect(html).toContain('data-preview-kind="rich"');
+    expect(html).toContain('data-preview-template-id="url-preview-template-');
+    expect(html).toContain("data-preview-popup-rich");
+    expect(html).toContain("<template id=\"url-preview-template-");
   });
 
   it("highlights registered keywords in message text with keyword-hl span", async () => {

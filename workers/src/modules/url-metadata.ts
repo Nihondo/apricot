@@ -14,13 +14,16 @@ const X_OEMBED_ENDPOINTS = [
   "https://publish.twitter.com/oembed",
 ];
 
+export type XEmbedTheme = "light" | "dark";
+
 export interface ResolvedUrlEmbed {
-  kind: "image" | "card";
+  kind: "image" | "card" | "rich";
   sourceUrl: string;
   imageUrl?: string;
   title?: string;
   siteName?: string;
   description?: string;
+  html?: string;
 }
 
 interface OEmbedPayload {
@@ -36,6 +39,10 @@ interface OEmbedPayload {
 interface HtmlMetadata {
   html: string;
   finalUrl: string;
+}
+
+interface ResolveUrlEmbedOptions {
+  xTheme?: XEmbedTheme;
 }
 
 function isPrivateIpv4(hostname: string): boolean {
@@ -117,13 +124,16 @@ export async function extractUrlMetadata(url: string): Promise<string> {
 /**
  * Resolves the first embeddable URL contained in the message text.
  */
-export async function resolveMessageEmbed(text: string): Promise<ResolvedUrlEmbed | undefined> {
+export async function resolveMessageEmbed(
+  text: string,
+  options: ResolveUrlEmbedOptions = {},
+): Promise<ResolvedUrlEmbed | undefined> {
   const urls = Array.from(text.matchAll(URL_RE), (match) => match[1]);
   for (const url of urls) {
     if (!isAllowedPreviewUrl(url)) {
       continue;
     }
-    const embed = await resolveUrlEmbed(url);
+    const embed = await resolveUrlEmbed(url, options);
     if (embed) {
       return embed;
     }
@@ -134,7 +144,10 @@ export async function resolveMessageEmbed(text: string): Promise<ResolvedUrlEmbe
 /**
  * Resolves a URL into a stored preview representation for the Web UI.
  */
-export async function resolveUrlEmbed(url: string): Promise<ResolvedUrlEmbed | undefined> {
+export async function resolveUrlEmbed(
+  url: string,
+  options: ResolveUrlEmbedOptions = {},
+): Promise<ResolvedUrlEmbed | undefined> {
   if (!isAllowedPreviewUrl(url)) {
     return undefined;
   }
@@ -149,7 +162,7 @@ export async function resolveUrlEmbed(url: string): Promise<ResolvedUrlEmbed | u
       return youtubeEmbed;
     }
 
-    const xEmbed = await resolveXEmbed(url);
+    const xEmbed = await resolveXEmbed(url, options.xTheme ?? "light");
     if (xEmbed) {
       return xEmbed;
     }
@@ -161,7 +174,7 @@ export async function resolveUrlEmbed(url: string): Promise<ResolvedUrlEmbed | u
 }
 
 async function extractTwitterMetadata(url: string): Promise<string> {
-  const data = await fetchXOEmbedPayload(url);
+  const data = await fetchXOEmbedPayload(url, "light");
   if (!data) {
     // Fall back to generic title extraction
     return extractPageTitle(url);
@@ -215,18 +228,32 @@ function resolveDirectImageEmbed(url: string): ResolvedUrlEmbed | undefined {
   };
 }
 
-async function resolveXEmbed(url: string): Promise<ResolvedUrlEmbed | undefined> {
+async function resolveXEmbed(url: string, theme: XEmbedTheme): Promise<ResolvedUrlEmbed | undefined> {
   if (!X_URL_RE.test(url)) {
     return undefined;
   }
 
-  const data = await fetchXOEmbedPayload(url);
+  const data = await fetchXOEmbedPayload(url, theme);
   if (!data) {
     return undefined;
   }
 
   const authorName = cleanMetadataText(data.author_name);
   const description = normalizeTwitterOEmbedText(data.html) || undefined;
+  const richHtml = cleanXRichEmbedHtml(data.html);
+  const title = authorName ? `Xユーザーの${authorName}さん` : "Xの投稿";
+
+  if (richHtml) {
+    return {
+      kind: "rich",
+      sourceUrl: url,
+      siteName: "X",
+      title,
+      description,
+      html: richHtml,
+    };
+  }
+
   if (!authorName && !description) {
     return undefined;
   }
@@ -235,7 +262,7 @@ async function resolveXEmbed(url: string): Promise<ResolvedUrlEmbed | undefined>
     kind: "card",
     sourceUrl: url,
     siteName: "X",
-    title: authorName ? `Xユーザーの${authorName}さん` : "Xの投稿",
+    title,
     description,
   };
 }
@@ -329,9 +356,9 @@ async function resolveHtmlEmbed(url: string): Promise<ResolvedUrlEmbed | undefin
   };
 }
 
-async function fetchXOEmbedPayload(url: string): Promise<OEmbedPayload | undefined> {
+async function fetchXOEmbedPayload(url: string, theme: XEmbedTheme): Promise<OEmbedPayload | undefined> {
   for (const endpoint of X_OEMBED_ENDPOINTS) {
-    const oembedUrl = `${endpoint}?url=${encodeURIComponent(url)}&omit_script=true`;
+    const oembedUrl = `${endpoint}?url=${encodeURIComponent(url)}&omit_script=1&maxwidth=355&maxheight=200&theme=${theme}`;
 
     try {
       const resp = await fetch(oembedUrl, {
@@ -545,6 +572,19 @@ function normalizeTwitterOEmbedText(value?: string): string {
 
   // X oEmbed appends an attribution block after an em dash.
   return cleanedText.replace(/\u2014.*$/, "").trim();
+}
+
+function cleanXRichEmbedHtml(value?: string): string | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed.toLowerCase().includes("<blockquote")) {
+    return undefined;
+  }
+
+  return trimmed;
 }
 
 function cleanMetadataText(value?: string): string | undefined {

@@ -132,6 +132,18 @@ a:hover { text-decoration: underline; }
 .url-embed--text-only {
   gap: 0;
 }
+.url-embed--rich {
+  display: block;
+  width: min(100%, 360px);
+  padding: 0;
+  overflow: hidden;
+}
+.url-embed__frame {
+  display: block;
+  width: 100%;
+  border: none;
+  background: transparent;
+}
 .url-embed__image {
   display: block;
   width: 100%;
@@ -184,6 +196,9 @@ a:hover { text-decoration: underline; }
   pointer-events: none;
 }
 .url-preview-popup[hidden] { display: none; }
+.url-preview-popup__rich[hidden] {
+  display: none;
+}
 .url-preview-popup .url-embed {
   width: min(360px, calc(100vw - 16px));
 }

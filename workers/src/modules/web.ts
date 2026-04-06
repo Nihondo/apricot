@@ -23,6 +23,7 @@ import SETTINGS_TEMPLATE from "../templates/settings.html";
 import {
   resolveMessageEmbed,
   type ResolvedUrlEmbed,
+  type XEmbedTheme,
 } from "./url-metadata";
 import { sanitizeCustomCss } from "../custom-css";
 
@@ -118,6 +119,9 @@ export const DEFAULT_WEB_UI_SETTINGS: WebUiSettings = {
 const SETTINGS_PREVIEW_CHANNEL_NAME = "#preview";
 const SETTINGS_PREVIEW_TOPIC = "配色プレビュー";
 const SETTINGS_PREVIEW_MESSAGE_VALUE = "送信テキストの見本";
+const X_EMBED_HEIGHT_MESSAGE_TYPE = "apricot-x-embed-resize";
+const X_EMBED_INITIAL_HEIGHT_PX = 160;
+const X_EMBED_DARK_THEME_LUMINANCE_THRESHOLD = 128;
 const SETTINGS_PREVIEW_SELF_NICK = "apricot";
 const SETTINGS_PREVIEW_HIGHLIGHT_KEYWORDS = ["重要ワード"];
 const SETTINGS_PREVIEW_DIM_KEYWORDS = ["log noise"];
@@ -194,6 +198,34 @@ function buildLinkBackgroundColor(accentColor: string): string {
   const green = Number.parseInt(accentColor.slice(3, 5), 16);
   const blue = Number.parseInt(accentColor.slice(5, 7), 16);
   return `rgba(${red},${green},${blue},0.2)`;
+}
+
+function normalizeHexColor(color: string): string | undefined {
+  const normalized = color.trim();
+  if (/^#[0-9a-fA-F]{6}$/.test(normalized)) {
+    return normalized;
+  }
+  if (!/^#[0-9a-fA-F]{3}$/.test(normalized)) {
+    return undefined;
+  }
+
+  return `#${normalized.slice(1).split("").map((part) => `${part}${part}`).join("")}`;
+}
+
+/**
+ * Resolves the X embed theme from the current channel background color.
+ */
+export function resolveXEmbedTheme(surfaceColor: string): XEmbedTheme {
+  const normalized = normalizeHexColor(surfaceColor);
+  if (!normalized) {
+    return "light";
+  }
+
+  const red = Number.parseInt(normalized.slice(1, 3), 16);
+  const green = Number.parseInt(normalized.slice(3, 5), 16);
+  const blue = Number.parseInt(normalized.slice(5, 7), 16);
+  const luminance = (red * 299 + green * 587 + blue * 114) / 1000;
+  return luminance < X_EMBED_DARK_THEME_LUMINANCE_THRESHOLD ? "dark" : "light";
 }
 
 function renderSettingsError(errorMessage: string): string {
@@ -407,6 +439,120 @@ function buildSettingsPreviewShellDocument(webUiSettings: WebUiSettings): string
 
 function escapeIframeSrcdoc(documentHtml: string): string {
   return escapeHtml(documentHtml);
+}
+
+function buildRichEmbedDocument(embed: ResolvedUrlEmbed, embedId: string): string {
+  const resizeScript = `(function () {
+  var embedId = ${JSON.stringify(embedId)};
+  var lastHeight = 0;
+  var rafId = 0;
+
+  function calculateHeight() {
+    var root = document.documentElement;
+    var body = document.body;
+    return Math.max(
+      root ? root.scrollHeight : 0,
+      root ? root.offsetHeight : 0,
+      body ? body.scrollHeight : 0,
+      body ? body.offsetHeight : 0,
+      body ? body.clientHeight : 0
+    );
+  }
+
+  function postHeight() {
+    rafId = 0;
+    var nextHeight = Math.max(1, Math.ceil(calculateHeight()));
+    if (nextHeight === lastHeight) {
+      return;
+    }
+    lastHeight = nextHeight;
+    if (window.parent && window.parent !== window) {
+      window.parent.postMessage({ type: ${JSON.stringify(X_EMBED_HEIGHT_MESSAGE_TYPE)}, embedId: embedId, height: nextHeight }, "*");
+    }
+  }
+
+  function schedulePostHeight() {
+    if (rafId) {
+      return;
+    }
+    rafId = window.requestAnimationFrame(postHeight);
+  }
+
+  if (typeof ResizeObserver === "function") {
+    var resizeObserver = new ResizeObserver(schedulePostHeight);
+    resizeObserver.observe(document.documentElement);
+    if (document.body) {
+      resizeObserver.observe(document.body);
+    }
+  }
+
+  if (typeof MutationObserver === "function") {
+    var mutationObserver = new MutationObserver(schedulePostHeight);
+    mutationObserver.observe(document.documentElement, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true
+    });
+  }
+
+  window.addEventListener("load", schedulePostHeight);
+  [0, 50, 150, 300, 600, 1000].forEach(function (delay) {
+    window.setTimeout(schedulePostHeight, delay);
+  });
+  schedulePostHeight();
+})();`;
+
+  return [
+    "<!DOCTYPE html>",
+    "<html><head>",
+    '<meta charset="utf-8">',
+    '<meta name="viewport" content="width=device-width, initial-scale=1">',
+    '<base target="_blank">',
+    "<style>",
+    "html, body { margin: 0; padding: 0; background: transparent; overflow: hidden; }",
+    "body { display: flex; justify-content: center; }",
+    ".twitter-tweet, .twitter-tweet-rendered { margin: 0 !important; }",
+    "iframe { max-width: 100% !important; }",
+    "</style>",
+    "</head><body>",
+    embed.html ?? "",
+    `<script>${resizeScript}</script>`,
+    '<script async src="https://platform.twitter.com/widgets.js" charset="utf-8"></script>',
+    "</body></html>",
+  ].join("");
+}
+
+function renderRichEmbedFrame(
+  embed: ResolvedUrlEmbed,
+  variant: "inline" | "popup",
+  embedId: string,
+): string {
+  const baseClass = variant === "inline" ? "url-embed url-embed--inline" : "url-embed url-embed--popup";
+  const sandbox = variant === "inline"
+    ? "allow-scripts allow-popups allow-popups-to-escape-sandbox"
+    : "allow-scripts";
+  const frameTitle = embed.title ?? "Xの投稿";
+  return `<div class="${baseClass} url-embed--rich">
+    <iframe
+      class="url-embed__frame"
+      title="${escapeHtml(frameTitle)}"
+      loading="lazy"
+      sandbox="${sandbox}"
+      scrolling="no"
+      data-apricot-rich-embed-id="${escapeHtml(embedId)}"
+      style="height:${X_EMBED_INITIAL_HEIGHT_PX}px"
+      srcdoc="${escapeIframeSrcdoc(buildRichEmbedDocument(embed, embedId))}"
+    ></iframe>
+  </div>`;
+}
+
+function renderRichEmbedTemplate(
+  embed: ResolvedUrlEmbed,
+  templateId: string,
+  embedId: string,
+): string {
+  return `<template id="${escapeHtml(templateId)}">${renderRichEmbedFrame(embed, "popup", embedId)}</template>`;
 }
 
 function buildSettingsPreviewHtml(webUiSettings: WebUiSettings): string {
@@ -643,11 +789,17 @@ function parseKeywords(raw: string): string[] {
   return raw.split(/[\n,]/).map((k) => k.trim()).filter((k) => k.length > 0);
 }
 
-function renderEmbedDataAttributes(embed: ResolvedUrlEmbed): string {
+function renderEmbedDataAttributes(embed: ResolvedUrlEmbed, previewTemplateId?: string): string {
   const attrs = [
     `data-preview-kind="${escapeHtml(embed.kind)}"`,
     `data-preview-source-url="${escapeHtml(embed.sourceUrl)}"`,
   ];
+  if (previewTemplateId) {
+    attrs.push(`data-preview-template-id="${escapeHtml(previewTemplateId)}"`);
+  }
+  if (embed.kind === "rich") {
+    return attrs.join(" ");
+  }
   if (embed.imageUrl) {
     attrs.push(`data-preview-image-url="${escapeHtml(embed.imageUrl)}"`);
   }
@@ -663,7 +815,15 @@ function renderEmbedDataAttributes(embed: ResolvedUrlEmbed): string {
   return attrs.join(" ");
 }
 
-function renderUrlEmbed(embed: ResolvedUrlEmbed, variant: "inline" | "popup"): string {
+function renderUrlEmbed(
+  embed: ResolvedUrlEmbed,
+  variant: "inline" | "popup",
+  embedId: string,
+): string {
+  if (embed.kind === "rich" && embed.html) {
+    return renderRichEmbedFrame(embed, variant, embedId);
+  }
+
   const baseClass = variant === "inline" ? "url-embed url-embed--inline" : "url-embed url-embed--popup";
   const embedClass = embed.imageUrl ? baseClass : `${baseClass} url-embed--text-only`;
   const imageClass = embed.kind === "image" ? "url-embed__image url-embed__image--full" : "url-embed__image";
@@ -687,6 +847,37 @@ function renderUrlEmbed(embed: ResolvedUrlEmbed, variant: "inline" | "popup"): s
     ${imageHtml}
     ${metaHtml}
   </a>`;
+}
+
+function buildRichEmbedScript(): string {
+  return `window.__apricotRichEmbedState = window.__apricotRichEmbedState || {
+  initialized: false
+};
+
+window.initializeApricotRichEmbeds = window.initializeApricotRichEmbeds || function initializeApricotRichEmbeds() {
+  var state = window.__apricotRichEmbedState;
+  if (state.initialized) {
+    return;
+  }
+  state.initialized = true;
+
+  window.addEventListener("message", function (event) {
+    var data = event.data;
+    if (!data || data.type !== ${JSON.stringify(X_EMBED_HEIGHT_MESSAGE_TYPE)} || typeof data.embedId !== "string" || typeof data.height !== "number") {
+      return;
+    }
+    var frame = document.querySelector('iframe[data-apricot-rich-embed-id="' + data.embedId + '"]');
+    if (!(frame instanceof HTMLIFrameElement)) {
+      return;
+    }
+    frame.style.height = Math.max(1, Math.ceil(data.height)) + "px";
+    window.dispatchEvent(new CustomEvent("apricot-rich-embed-resized", {
+      detail: { embedId: data.embedId }
+    }));
+  });
+};
+
+window.initializeApricotRichEmbeds();`;
 }
 
 function buildPreviewScript(): string {
@@ -714,7 +905,8 @@ window.initializeApricotPreview = window.initializeApricotPreview || function in
     var popupSite = popup.querySelector("[data-preview-popup-site]");
     var popupTitle = popup.querySelector("[data-preview-popup-title]");
     var popupDescription = popup.querySelector("[data-preview-popup-description]");
-    if (!popupEmbed || !popupImage || !popupSite || !popupTitle || !popupDescription) {
+    var popupRich = popup.querySelector("[data-preview-popup-rich]");
+    if (!popupEmbed || !popupImage || !popupSite || !popupTitle || !popupDescription || !popupRich) {
       return null;
     }
     return {
@@ -723,7 +915,8 @@ window.initializeApricotPreview = window.initializeApricotPreview || function in
       popupImage: popupImage,
       popupSite: popupSite,
       popupTitle: popupTitle,
-      popupDescription: popupDescription
+      popupDescription: popupDescription,
+      popupRich: popupRich
     };
   }
 
@@ -731,11 +924,30 @@ window.initializeApricotPreview = window.initializeApricotPreview || function in
     return target instanceof Element ? target.closest("a[data-preview-kind]") : null;
   }
 
+  function clearPopupRich(popupParts) {
+    popupParts.popupRich.replaceChildren();
+    popupParts.popupRich.hidden = true;
+  }
+
   function fillPopup(link) {
     var popupParts = getPopupParts(getPopup());
     if (!popupParts) {
       return false;
     }
+    clearPopupRich(popupParts);
+    if (link.dataset.previewKind === "rich") {
+      var templateId = link.dataset.previewTemplateId;
+      var template = templateId ? document.getElementById(templateId) : null;
+      if (!(template instanceof HTMLTemplateElement)) {
+        return false;
+      }
+      popupParts.popupEmbed.hidden = true;
+      popupParts.popupRich.appendChild(template.content.cloneNode(true));
+      popupParts.popupRich.hidden = false;
+      popupParts.popup.classList.remove("url-preview-popup--card");
+      return true;
+    }
+    popupParts.popupEmbed.hidden = false;
     var hasPreviewImage = Boolean(link.dataset.previewImageUrl);
     popupParts.popupImage.hidden = !hasPreviewImage;
     if (hasPreviewImage) {
@@ -787,6 +999,11 @@ window.initializeApricotPreview = window.initializeApricotPreview || function in
 
   function hidePopup() {
     state.activeLink = null;
+    var popupParts = getPopupParts(getPopup());
+    if (popupParts) {
+      clearPopupRich(popupParts);
+      popupParts.popupEmbed.hidden = false;
+    }
     var popup = getPopup();
     if (popup) {
       popup.hidden = true;
@@ -886,6 +1103,11 @@ window.initializeApricotPreview = window.initializeApricotPreview || function in
 
   window.addEventListener("scroll", hidePopup, { passive: true });
   window.addEventListener("resize", hidePopup);
+  window.addEventListener("apricot-rich-embed-resized", function () {
+    if (state.activeLink) {
+      positionPopup(state.activeLink);
+    }
+  });
 };
 
 window.initializeApricotPreview();`;
@@ -1420,6 +1642,7 @@ function renderText(
   highlightKeywords: string[] = [],
   embed?: ResolvedUrlEmbed,
   enablePopupPreview = false,
+  previewTemplateId?: string,
 ): string {
   const urlRe = /(https?:\/\/[^\s<>"]+)/g;
   let result = "";
@@ -1432,7 +1655,7 @@ function renderText(
     let hostname: string;
     try { hostname = new URL(url).hostname; } catch { hostname = url; }
     const previewAttrs = enablePopupPreview && embed?.sourceUrl === url
-      ? ` class="url-link url-link--preview" ${renderEmbedDataAttributes(embed)}`
+      ? ` class="url-link url-link--preview" ${renderEmbedDataAttributes(embed, previewTemplateId)}`
       : ' class="url-link"';
     result += `<a href="${escapeHtml(url)}" target="_blank" rel="noopener"${previewAttrs}>${escapeHtml(hostname)}</a>`;
     last = m.index + url.length;
@@ -1465,39 +1688,59 @@ function renderMessage(
   offsetHours: number,
   highlightKeywords: string[] = [],
   webUiSettings: WebUiSettings = DEFAULT_WEB_UI_SETTINGS,
+  renderKey = "message",
 ): string {
   const ts = `<span class="timestamp">${formatTime(m.time, offsetHours)}</span>`;
   const isSelf = m.nick.toLowerCase() === selfNick.toLowerCase();
   const nickClass = isSelf ? "username-self" : "username-other";
   const canUsePopupPreview = !webUiSettings.enableInlineUrlPreview && Boolean(m.embed);
+  const popupTemplateId = canUsePopupPreview && m.embed?.kind === "rich"
+    ? `url-preview-template-${renderKey}`
+    : undefined;
   const inlineEmbedHtml = webUiSettings.enableInlineUrlPreview && m.embed
-      ? `<div class="url-embed-container">${renderUrlEmbed(m.embed, "inline")}</div>`
+      ? `<div class="url-embed-container">${renderUrlEmbed(m.embed, "inline", `inline-${renderKey}`)}</div>`
       : "";
+  const popupTemplateHtml = popupTemplateId && m.embed?.kind === "rich" && m.embed.html
+    ? renderRichEmbedTemplate(m.embed, popupTemplateId, `popup-${renderKey}`)
+    : "";
+  let messageHtml: string;
 
   switch (m.type) {
     case "privmsg":
-      return `${ts} <span class="${nickClass}">${escapeHtml(m.nick)}&gt;</span> ${renderText(m.text, highlightKeywords, m.embed, canUsePopupPreview)}${inlineEmbedHtml}`;
+      messageHtml = `${ts} <span class="${nickClass}">${escapeHtml(m.nick)}&gt;</span> ${renderText(m.text, highlightKeywords, m.embed, canUsePopupPreview, popupTemplateId)}${inlineEmbedHtml}`;
+      break;
     case "notice":
-      return `${ts} <span class="${nickClass}">(${escapeHtml(m.nick)})</span> ${renderText(m.text, highlightKeywords, m.embed, canUsePopupPreview)}${inlineEmbedHtml}`;
+      messageHtml = `${ts} <span class="${nickClass}">(${escapeHtml(m.nick)})</span> ${renderText(m.text, highlightKeywords, m.embed, canUsePopupPreview, popupTemplateId)}${inlineEmbedHtml}`;
+      break;
     case "self":
-      return `${ts} <span class="username-self">${escapeHtml(m.nick)}&gt;</span> ${renderText(m.text, highlightKeywords, m.embed, canUsePopupPreview)}${inlineEmbedHtml}`;
+      messageHtml = `${ts} <span class="username-self">${escapeHtml(m.nick)}&gt;</span> ${renderText(m.text, highlightKeywords, m.embed, canUsePopupPreview, popupTemplateId)}${inlineEmbedHtml}`;
+      break;
     case "join":
-      return `${ts} <span class="timestamp">*** ${escapeHtml(m.nick)} has joined ${escapeHtml(m.text)}</span>`;
+      messageHtml = `${ts} <span class="timestamp">*** ${escapeHtml(m.nick)} has joined ${escapeHtml(m.text)}</span>`;
+      break;
     case "part":
-      return `${ts} <span class="timestamp">*** ${escapeHtml(m.nick)} has left ${escapeHtml(m.text)}</span>`;
+      messageHtml = `${ts} <span class="timestamp">*** ${escapeHtml(m.nick)} has left ${escapeHtml(m.text)}</span>`;
+      break;
     case "quit":
-      return `${ts} <span class="timestamp">*** ${escapeHtml(m.nick)} has quit (${escapeHtml(m.text)})</span>`;
+      messageHtml = `${ts} <span class="timestamp">*** ${escapeHtml(m.nick)} has quit (${escapeHtml(m.text)})</span>`;
+      break;
     case "kick":
-      return `${ts} <span class="timestamp">*** ${escapeHtml(m.text)}</span>`;
+      messageHtml = `${ts} <span class="timestamp">*** ${escapeHtml(m.text)}</span>`;
+      break;
     case "nick":
-      return `${ts} <span class="timestamp">*** ${escapeHtml(m.nick)} is now known as ${escapeHtml(m.text)}</span>`;
+      messageHtml = `${ts} <span class="timestamp">*** ${escapeHtml(m.nick)} is now known as ${escapeHtml(m.text)}</span>`;
+      break;
     case "topic":
-      return `${ts} <span class="timestamp">*** ${escapeHtml(m.nick)} changed topic to: ${escapeHtml(m.text)}</span>`;
+      messageHtml = `${ts} <span class="timestamp">*** ${escapeHtml(m.nick)} changed topic to: ${escapeHtml(m.text)}</span>`;
+      break;
     case "mode":
-      return `${ts} <span class="timestamp">*** ${escapeHtml(m.nick)} sets mode ${escapeHtml(m.text)}</span>`;
+      messageHtml = `${ts} <span class="timestamp">*** ${escapeHtml(m.nick)} sets mode ${escapeHtml(m.text)}</span>`;
+      break;
     default:
-      return `${ts} ${renderText(m.text, highlightKeywords, m.embed, canUsePopupPreview)}${inlineEmbedHtml}`;
+      messageHtml = `${ts} ${renderText(m.text, highlightKeywords, m.embed, canUsePopupPreview, popupTemplateId)}${inlineEmbedHtml}`;
   }
+
+  return `${messageHtml}${popupTemplateHtml}`;
 }
 
 // ---------------------------------------------------------------------------
@@ -1678,6 +1921,7 @@ export function createWebModule(
   maxLines = DEFAULT_maxLines,
   onChannelLogsChanged?: ChannelLogsChangedCallback,
   enableRemoteUrlPreview = false,
+  getWebUiSettings: () => WebUiSettings = () => DEFAULT_WEB_UI_SETTINGS,
 ) {
   const store: MessageBufferStore = new Map();
 
@@ -1731,7 +1975,9 @@ export function createWebModule(
       type,
       nick,
       text,
-      embed: embed ?? (shouldResolveEmbed ? await resolveMessageEmbed(text) : undefined),
+      embed: embed ?? (shouldResolveEmbed
+        ? await resolveMessageEmbed(text, { xTheme: resolveXEmbedTheme(getWebUiSettings().surfaceColor) })
+        : undefined),
     };
   }
 
@@ -1879,6 +2125,7 @@ export function createWebModule(
       : "";
     const scriptParts: string[] = [
       buildMessagesPageScript(channel, webUiSettings, channelRevision),
+      buildRichEmbedScript(),
     ];
     if (webUiSettings.displayOrder === "asc") {
       scriptParts.push(buildConditionalAutoScrollScript(channel));
@@ -1911,16 +2158,17 @@ export function createWebModule(
     const hlKeywords = parseKeywords(webUiSettings.highlightKeywords);
     const dimKeywordList = parseKeywords(webUiSettings.dimKeywords);
     const lines = ordered
-      .map((msg) => {
+      .map((msg, index) => {
         const isDimmed = dimKeywordList.length > 0 &&
           dimKeywordList.some((kw) => msg.text.toLowerCase().includes(kw.toLowerCase()));
         const divAttrs = isDimmed ? ' class="msg-dimmed"' : "";
-        return `<div${divAttrs}>${renderMessage(msg, selfNick, timezoneOffset, hlKeywords, webUiSettings)}</div>`;
+        return `<div${divAttrs}>${renderMessage(msg, selfNick, timezoneOffset, hlKeywords, webUiSettings, `${channel.toLowerCase().replace(/[^a-z0-9]+/gi, "-")}-${index}`)}</div>`;
       })
       .join("\n");
     const popupHtml = webUiSettings.enableInlineUrlPreview
       ? ""
       : `<div id="url-preview-popup" class="url-preview-popup" hidden>
+  <div data-preview-popup-rich class="url-preview-popup__rich" hidden></div>
   <div data-preview-popup-embed class="url-embed url-embed--popup">
     <img data-preview-popup-image src="" alt="URL preview" class="url-embed__image" loading="lazy">
     <span class="url-embed__meta">

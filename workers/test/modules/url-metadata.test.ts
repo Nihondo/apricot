@@ -51,13 +51,44 @@ describe("url metadata resolver", () => {
     expect(metadata).not.toContain("(@catsareblessing)");
   });
 
-  it("resolves X URLs as text cards when oEmbed returns post text", async () => {
+  it("resolves X URLs as rich embeds and includes the configured theme", async () => {
     fetchMock.mockImplementation(async (input) => {
       const url = String(input);
       if (url.startsWith("https://publish.x.com/oembed")) {
+        expect(url).toContain("omit_script=1");
+        expect(url).toContain("maxwidth=355");
+        expect(url).toContain("maxheight=200");
+        expect(url).toContain("theme=dark");
         return Response.json({
           author_name: "We don&#39;t deserve cats 😺",
-          html: "<blockquote><p>She adores her only baby.. pic.twitter.com/PlPzyKtKBc&mdash; We don&#39;t deserve cats 😺 (@catsareblessing) April 4, 2026</p></blockquote>",
+          html: "<blockquote class=\"twitter-tweet\"><p>She adores her only baby.. pic.twitter.com/PlPzyKtKBc&mdash; We don&#39;t deserve cats 😺 (@catsareblessing) April 4, 2026</p></blockquote>",
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const embed = await resolveUrlEmbed("https://x.com/catsareblessing/status/2040275667414053299", {
+      xTheme: "dark",
+    });
+
+    expect(embed).toEqual({
+      kind: "rich",
+      sourceUrl: "https://x.com/catsareblessing/status/2040275667414053299",
+      siteName: "X",
+      title: "XユーザーのWe don't deserve cats 😺さん",
+      description: "She adores her only baby.. pic.twitter.com/PlPzyKtKBc",
+      html: "<blockquote class=\"twitter-tweet\"><p>She adores her only baby.. pic.twitter.com/PlPzyKtKBc&mdash; We don&#39;t deserve cats 😺 (@catsareblessing) April 4, 2026</p></blockquote>",
+    });
+  });
+
+  it("falls back to a text card for X URLs when oEmbed html is empty", async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.startsWith("https://publish.x.com/oembed")) {
+        expect(url).toContain("theme=light");
+        return Response.json({
+          author_name: "We don&#39;t deserve cats 😺",
+          html: "",
         });
       }
       throw new Error(`unexpected fetch: ${url}`);
@@ -70,7 +101,7 @@ describe("url metadata resolver", () => {
       sourceUrl: "https://x.com/catsareblessing/status/2040275667414053299",
       siteName: "X",
       title: "XユーザーのWe don't deserve cats 😺さん",
-      description: "She adores her only baby.. pic.twitter.com/PlPzyKtKBc",
+      description: undefined,
     });
   });
 
