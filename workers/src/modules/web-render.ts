@@ -165,7 +165,9 @@ function buildRichEmbedScript(): string {
   return `window.__apricotRichEmbedState = window.__apricotRichEmbedState || {
   initialized: false,
   loaderRequested: false,
-  pendingRoots: []
+  pendingRoots: [],
+  renderedHandlerBound: false,
+  loadedHandlerBound: false
 };
 
 window.initializeApricotRichEmbeds = window.initializeApricotRichEmbeds || function initializeApricotRichEmbeds() {
@@ -216,9 +218,20 @@ window.initializeApricotRichEmbeds = window.initializeApricotRichEmbeds || funct
     }(document, "script", "twitter-wjs"));
 
     window.twttr.ready(function (twttr) {
-      if (twttr.events && typeof twttr.events.bind === "function") {
+      if (twttr.events && typeof twttr.events.bind === "function" && !state.loadedHandlerBound) {
+        state.loadedHandlerBound = true;
         twttr.events.bind("loaded", function () {
           window.dispatchEvent(new CustomEvent("apricot-rich-embed-loaded"));
+        });
+      }
+      if (twttr.events && typeof twttr.events.bind === "function" && !state.renderedHandlerBound) {
+        state.renderedHandlerBound = true;
+        twttr.events.bind("rendered", function (event) {
+          window.dispatchEvent(new CustomEvent("apricot-rich-embed-loaded", {
+            detail: {
+              target: event && event.target ? event.target : null
+            }
+          }));
         });
       }
       flushPendingRoots();
@@ -498,9 +511,14 @@ function buildConditionalAutoScrollScript(channel: string): string {
 var nearBottomThreshold = 48;
 var scrollStateStorageKey = ${storageKey};
 var shouldStickToBottom = readShouldStickToBottom();
+var messagesShellResizeObserver = null;
 
 function getScrollRoot() {
   return document.scrollingElement || document.documentElement;
+}
+
+function getMessagesShell() {
+  return document.getElementById("channel-messages-shell");
 }
 
 function scrollToBottom() {
@@ -563,18 +581,54 @@ function bindPendingImages() {
   });
 }
 
+function handleMessagesShellResize() {
+  if (!shouldStickToBottom) {
+    return;
+  }
+  window.requestAnimationFrame(stickToBottomIfNeeded);
+}
+
+function bindMessagesShellResize() {
+  if (messagesShellResizeObserver || typeof ResizeObserver !== "function") {
+    return;
+  }
+  var shell = getMessagesShell();
+  if (!shell) {
+    return;
+  }
+  messagesShellResizeObserver = new ResizeObserver(function () {
+    handleMessagesShellResize();
+  });
+  messagesShellResizeObserver.observe(shell);
+}
+
 if (shouldStickToBottom) {
   scheduleBottomStick();
   bindPendingImages();
+  bindMessagesShellResize();
 }
 
 window.addEventListener("scroll", updateShouldStickToBottom, { passive: true });
+window.addEventListener("apricot-rich-embed-loaded", function (event) {
+  var detail = event && event.detail;
+  var target = detail && detail.target;
+  var shell = getMessagesShell();
+  if (shell && target instanceof Element && !shell.contains(target)) {
+    return;
+  }
+  bindMessagesShellResize();
+  handleMessagesShellResize();
+});
 
 window.addEventListener("beforeunload", function () {
   updateShouldStickToBottom();
+  if (messagesShellResizeObserver && typeof messagesShellResizeObserver.disconnect === "function") {
+    messagesShellResizeObserver.disconnect();
+  }
 });
 
 window.apricotMessagesRuntime.getScrollRoot = getScrollRoot;
+window.apricotMessagesRuntime.getMessagesShell = getMessagesShell;
 window.apricotMessagesRuntime.scrollToBottom = scrollToBottom;
 window.apricotMessagesRuntime.isNearBottom = isNearBottom;
 window.apricotMessagesRuntime.setShouldStickToBottom = setShouldStickToBottom;
@@ -582,6 +636,8 @@ window.apricotMessagesRuntime.updateShouldStickToBottom = updateShouldStickToBot
 window.apricotMessagesRuntime.stickToBottomIfNeeded = stickToBottomIfNeeded;
 window.apricotMessagesRuntime.scheduleBottomStick = scheduleBottomStick;
 window.apricotMessagesRuntime.bindPendingImages = bindPendingImages;
+window.apricotMessagesRuntime.bindMessagesShellResize = bindMessagesShellResize;
+window.apricotMessagesRuntime.handleMessagesShellResize = handleMessagesShellResize;
 window.apricotMessagesRuntime.writeShouldStickToBottom = writeShouldStickToBottom;`;
 }
 

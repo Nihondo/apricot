@@ -75,11 +75,15 @@ describe("web-render", () => {
     expect(ascHtml.indexOf("first")).toBeLessThan(ascHtml.indexOf("second"));
     expect(ascHtml).toContain("nearBottomThreshold = 48");
     expect(ascHtml).toContain("var apricotLatestSequence = 2");
+    expect(ascHtml).toContain("var messagesShellResizeObserver = null");
+    expect(ascHtml).toContain("new ResizeObserver");
+    expect(ascHtml).toContain('window.addEventListener("apricot-rich-embed-loaded"');
     const shellStart = descHtml.indexOf('<div id="channel-messages-shell">');
     const shellEnd = descHtml.indexOf("</div><button", shellStart);
     const messagesMarkup = descHtml.slice(shellStart, shellEnd);
     expect(messagesMarkup.indexOf("second")).toBeLessThan(messagesMarkup.indexOf("first"));
     expect(descHtml).toContain("再読込");
+    expect(descHtml).not.toContain("new ResizeObserver");
     expect(fragment.mode).toBe("delta");
     expect(fragment.startSequence).toBe(1);
     expect(fragment.latestSequence).toBe(2);
@@ -191,6 +195,8 @@ describe("web-render", () => {
     expect(inlineHtml).toContain("url-embed-container");
     expect(inlineHtml).toContain("data-apricot-rich-embed");
     expect(inlineHtml).toContain("platform.twitter.com/widgets.js");
+    expect(inlineHtml).toContain('twttr.events.bind("rendered"');
+    expect(inlineHtml).toContain('new CustomEvent("apricot-rich-embed-loaded"');
     expect(inlineHtml).toContain('src="https://cdn.example.com/cat.jpg"');
     expect(inlineHtml).not.toContain('id="url-preview-popup"');
     expect(popupHtml).toContain('id="url-preview-popup"');
