@@ -45,7 +45,6 @@ const proxyIdStorageKey = "proxy:id";
 
 class FakeStorage {
   private values = new Map<string, unknown>();
-  private alarmTime: number | null = null;
 
   seed(key: string, value: unknown): void {
     this.values.set(key, structuredClone(value));
@@ -68,13 +67,9 @@ class FakeStorage {
     return this.values.delete(key);
   }
 
-  async setAlarm(time: number): Promise<void> {
-    this.alarmTime = time;
-  }
+  async setAlarm(_time: number): Promise<void> {}
 
-  async deleteAlarm(): Promise<void> {
-    this.alarmTime = null;
-  }
+  async deleteAlarm(): Promise<void> {}
 }
 
 class FakeState {

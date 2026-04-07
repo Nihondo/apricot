@@ -18,20 +18,13 @@ import {
   buildSettingsPage,
   buildWebUiSettings,
   createWebModule,
-  DEFAULT_WEB_UI_SETTINGS,
-  LIGHT_WEB_UI_COLOR_PRESET,
-  isWebDisplayOrder,
   resolveXEmbedTheme,
-  sanitizeStoredCustomCss,
   type PersistedWebLogs,
-  type WebUiColorSettings,
   type WebUiSettings,
 } from "./modules/web";
 import {
   type BrowserRenderingConfig,
-  extractUrlMetadata,
   resolveMessageEmbed,
-  resolveUrlEmbed,
   type ResolvedUrlEmbed,
 } from "./modules/url-metadata";
 import {
@@ -47,17 +40,44 @@ import {
   type ProxyInstanceConfig,
 } from "./proxy-config";
 import { escapeUnsupportedIrcText } from "./irc-text-escape";
-import { sanitizeCustomCss } from "./custom-css";
 import APRICOT_APP_ICON_PNG from "./assets/apricot_app_icon.png";
 import APRICOT_LOGO_PNG from "./assets/apricot_logo.png";
 import LOGIN_TEMPLATE from "./templates/login.html";
+import {
+  handleApiConfig,
+  handleApiDisconnect,
+  handleApiJoin,
+  handleApiLeave,
+  handleApiLogs,
+  handleApiNick,
+  handleApiPost,
+} from "./irc-proxy/api-handlers";
+import {
+  corsHeaders,
+  jsonOk,
+  methodNotAllowed,
+  notFound,
+  redirectResponse,
+  unauthorized,
+} from "./irc-proxy/response";
+import { isWebAuthenticated, redirectToWebLogin } from "./irc-proxy/web-auth";
+import { normalizeStoredWebUiSettings } from "./irc-proxy/web-settings";
+import {
+  handleWebChannelComposer,
+  handleWebConfig,
+  handleWebJoin,
+  handleWebLeave,
+  handleWebLogin,
+  handleWebLogout,
+  handleWebNick,
+  handleWebSettings,
+} from "./irc-proxy/web-handlers";
 
 const reconnectDelayMs = 5_000;
 const proxyConfigStorageKey = "proxy:config:v1";
 const proxyIdStorageKey = "proxy:id";
 const webLogsStorageKey = "web:logs:v1";
 const webUiSettingsStorageKey = "web:ui-settings:v1";
-const webAuthCookieName = "apricot_web_auth";
 const nickErrorCodes = new Set(["431", "432", "433", "436", "437", "438", "447", "484", "485"]);
 type WebChannelUpdateMessage = {
   type: "channel-updated";
@@ -74,22 +94,6 @@ type WebUpdateSocketMessage =
   | WebChannelUpdateMessage
   | WebHeartbeatPingMessage
   | WebHeartbeatPongMessage;
-const webUiColorFieldNames: Array<keyof WebUiColorSettings> = [
-  "textColor",
-  "surfaceColor",
-  "surfaceAltColor",
-  "accentColor",
-  "borderColor",
-  "usernameColor",
-  "timestampColor",
-  "highlightColor",
-  "buttonColor",
-  "buttonTextColor",
-  "selfColor",
-  "mutedTextColor",
-  "keywordColor",
-];
-
 export class IrcProxyDO implements DurableObject {
   private state: DurableObjectState;
   private clients = new Set<WebSocket>();
@@ -209,12 +213,12 @@ export class IrcProxyDO implements DurableObject {
       return new Response("CLIENT_PASSWORD not configured", { status: 503 });
     }
 
-    if (isProtectedWebAssetRequest && !await this.isWebAuthenticated(request, proxyPrefix)) {
-      return new Response("Unauthorized", { status: 401 });
+    if (isProtectedWebAssetRequest && !await isWebAuthenticated(request, proxyPrefix, this.config?.password)) {
+      return unauthorized();
     }
 
-    if (isProtectedWebRequest && !webUpdatesMatch && !await this.isWebAuthenticated(request, proxyPrefix)) {
-      return this.redirectToWebLogin(webBase);
+    if (isProtectedWebRequest && !webUpdatesMatch && !await isWebAuthenticated(request, proxyPrefix, this.config?.password)) {
+      return redirectToWebLogin(webBase);
     }
 
     // POST /api/connect — connect to IRC server
@@ -253,13 +257,13 @@ export class IrcProxyDO implements DurableObject {
 
     // GET /api/status — proxy status
     if (request.method === "GET" && url.pathname === "/api/status") {
-      return Response.json({
+      return jsonOk({
         connected: this.serverConn?.connected ?? false,
         nick: this.nick,
         channels: this.channels,
         clients: this.clients.size,
         serverName: this.serverName,
-      }, { headers: corsHeaders() });
+      });
     }
 
     // --- API routes ---
@@ -274,49 +278,97 @@ export class IrcProxyDO implements DurableObject {
 
     // POST /api/join — join a channel
     if (request.method === "POST" && url.pathname === "/api/join") {
-      return this.handleApiJoin(request);
+      return handleApiJoin(request, this.serverConn);
     }
 
     // POST /api/leave — leave a channel
     if (request.method === "POST" && url.pathname === "/api/leave") {
-      return this.handleApiLeave(request);
+      return handleApiLeave(request, this.serverConn);
     }
 
     // POST /api/post — programmatic message posting
     if (request.method === "POST" && url.pathname === "/api/post") {
-      return this.handleApiPost(request);
+      return handleApiPost(request, {
+        browserRenderingConfig: this.browserRenderingConfig,
+        config: this.config,
+        getResolvedConfig: () => this.config,
+        instanceConfig: this.instanceConfig,
+        serverConn: this.serverConn,
+        state: this.state,
+        web: this.web,
+        webUiSettings: this.webUiSettings,
+        applyResolvedProxyConfig: this.applyResolvedProxyConfig.bind(this),
+        buildPersistedProxyConfigUpdate: this.buildPersistedProxyConfigUpdate.bind(this),
+        persistProxyConfig: this.persistProxyConfig.bind(this),
+        postChannelMessage: this.postChannelMessage.bind(this),
+        requestNickChange: this.requestNickChange.bind(this),
+        setSuppressAutoReconnectOnClose: (value) => {
+          this.suppressAutoReconnectOnClose = value;
+        },
+      });
     }
 
     // POST /api/nick — request a nick change
     if (request.method === "POST" && url.pathname === "/api/nick") {
-      return this.handleApiNick(request);
+      return handleApiNick(request, this.requestNickChange.bind(this));
     }
 
     // PUT /api/config — persist per-proxy default config
     if (request.method === "PUT" && url.pathname === "/api/config") {
-      return this.handleApiConfig(request);
+      return handleApiConfig(request, {
+        browserRenderingConfig: this.browserRenderingConfig,
+        config: this.config,
+        getResolvedConfig: () => this.config,
+        instanceConfig: this.instanceConfig,
+        serverConn: this.serverConn,
+        state: this.state,
+        web: this.web,
+        webUiSettings: this.webUiSettings,
+        applyResolvedProxyConfig: this.applyResolvedProxyConfig.bind(this),
+        buildPersistedProxyConfigUpdate: this.buildPersistedProxyConfigUpdate.bind(this),
+        persistProxyConfig: this.persistProxyConfig.bind(this),
+        postChannelMessage: this.postChannelMessage.bind(this),
+        requestNickChange: this.requestNickChange.bind(this),
+        setSuppressAutoReconnectOnClose: (value) => {
+          this.suppressAutoReconnectOnClose = value;
+        },
+      });
     }
 
     // POST /api/disconnect — disconnect from IRC server
     if (request.method === "POST" && url.pathname === "/api/disconnect") {
-      return this.handleApiDisconnect();
+      return handleApiDisconnect({
+        browserRenderingConfig: this.browserRenderingConfig,
+        config: this.config,
+        getResolvedConfig: () => this.config,
+        instanceConfig: this.instanceConfig,
+        serverConn: this.serverConn,
+        state: this.state,
+        web: this.web,
+        webUiSettings: this.webUiSettings,
+        applyResolvedProxyConfig: this.applyResolvedProxyConfig.bind(this),
+        buildPersistedProxyConfigUpdate: this.buildPersistedProxyConfigUpdate.bind(this),
+        persistProxyConfig: this.persistProxyConfig.bind(this),
+        postChannelMessage: this.postChannelMessage.bind(this),
+        requestNickChange: this.requestNickChange.bind(this),
+        setSuppressAutoReconnectOnClose: (value) => {
+          this.suppressAutoReconnectOnClose = value;
+        },
+      });
     }
 
     // GET /api/logs/:channel — retrieve buffered messages for a channel
     const logsMatch = url.pathname.match(/^\/api\/logs\/(.+)$/);
     if (request.method === "GET" && logsMatch) {
-      return this.handleApiLogs(decodeURIComponent(logsMatch[1]));
+      return handleApiLogs(decodeURIComponent(logsMatch[1]), this.web);
     }
 
     // --- Web interface routes ---
 
     // GET /web/login — login form for password-protected web UI
     if (request.method === "GET" && isWebLoginPath) {
-      if (await this.isWebAuthenticated(request, proxyPrefix)) {
-        return new Response(null, {
-          status: 302,
-          headers: { Location: `${webBase}/` },
-        });
+      if (await isWebAuthenticated(request, proxyPrefix, this.config?.password)) {
+        return redirectResponse(`${webBase}/`);
       }
       return this.renderWebLoginPage(`${webBase}/login`);
     }
@@ -349,20 +401,23 @@ export class IrcProxyDO implements DurableObject {
 
     // POST /web/login — validate password and set session cookie
     if (request.method === "POST" && isWebLoginPath) {
-      return this.handleWebLogin(request, proxyPrefix, webBase);
+      return handleWebLogin(request, proxyPrefix, webBase, {
+        configPassword: this.config?.password,
+        renderWebLoginPage: this.renderWebLoginPage.bind(this),
+      });
     }
 
     // POST /web/logout — clear session cookie
     if (request.method === "POST" && isWebLogoutPath) {
-      return this.handleWebLogout(request, proxyPrefix, webBase);
+      return handleWebLogout(request, proxyPrefix, webBase);
     }
 
     if (isWebLoginPath || isWebLogoutPath) {
-      return new Response("Method Not Allowed", { status: 405 });
+      return methodNotAllowed();
     }
 
     if (isWebSettingsPath && !this.canEditWebSettings()) {
-      return new Response("Not found", { status: 404 });
+      return notFound();
     }
 
     if (request.method === "GET" && isWebSettingsPath) {
@@ -370,86 +425,52 @@ export class IrcProxyDO implements DurableObject {
     }
 
     if (request.method === "POST" && isWebSettingsPath) {
-      return this.handleWebSettings(request, webBase);
+      return handleWebSettings(request, webBase, {
+        currentSettings: this.webUiSettings,
+        persistWebUiSettings: this.persistWebUiSettings.bind(this),
+        renderWebSettingsPage: this.renderWebSettingsPage.bind(this),
+      });
     }
 
     if (isWebSettingsPath) {
-      return new Response("Method Not Allowed", { status: 405 });
+      return methodNotAllowed();
     }
 
     if (request.method === "POST" && isWebConfigPath) {
-      return this.handleWebConfig(request, webBase);
+      return handleWebConfig(request, webBase, {
+        instanceConfig: this.instanceConfig,
+        buildPersistedProxyConfigUpdate: this.buildPersistedProxyConfigUpdate.bind(this),
+        persistProxyConfig: this.persistProxyConfig.bind(this),
+        applyResolvedProxyConfig: this.applyResolvedProxyConfig.bind(this),
+        buildWebPersistedConfigFormValues: this.buildWebPersistedConfigFormValues.bind(this),
+        buildWebChannelListPage: this.buildWebChannelListPage.bind(this),
+      });
     }
 
     if (isWebConfigPath) {
-      return new Response("Method Not Allowed", { status: 405 });
+      return methodNotAllowed();
     }
 
     if (url.pathname === "/web/display-order" || url.pathname === "/web/display-order/") {
-      return new Response("Not found", { status: 404 });
+      return notFound();
     }
 
     // POST /web/join — join a channel from web UI
     if (request.method === "POST" && (url.pathname === "/web/join" || url.pathname === "/web/join/")) {
-      const formData = await request.formData();
-      const channelResult = validateChannelInput(formData.get("channel") as string | null);
-      if (!channelResult.ok) {
-        return new Response(
-          this.buildWebChannelListPage(webBase, {
-            flashMessage: `JOIN に失敗しました: ${channelResult.error}`,
-            flashTone: "danger",
-          }),
-          { status: 400, headers: { "Content-Type": "text/html; charset=utf-8" } }
-        );
-      }
-      if (!this.serverConn?.connected) {
-        return new Response(
-          this.buildWebChannelListPage(webBase, {
-            flashMessage: "JOIN に失敗しました: not connected to IRC server",
-            flashTone: "danger",
-          }),
-          { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } }
-        );
-      }
-      await this.serverConn.send({ command: "JOIN", params: [channelResult.value] });
-      return new Response(null, {
-        status: 302,
-        headers: { Location: `${webBase}/` },
-      });
+      return handleWebJoin(request, webBase, this.buildWebChannelListPage.bind(this), this.serverConn);
     }
 
     // POST /web/leave — leave a channel from web UI
     if (request.method === "POST" && (url.pathname === "/web/leave" || url.pathname === "/web/leave/")) {
-      const formData = await request.formData();
-      const channelResult = validateChannelInput(formData.get("channel") as string | null);
-      if (!channelResult.ok) {
-        return new Response(
-          this.buildWebChannelListPage(webBase, {
-            flashMessage: `PART に失敗しました: ${channelResult.error}`,
-            flashTone: "danger",
-          }),
-          { status: 400, headers: { "Content-Type": "text/html; charset=utf-8" } }
-        );
-      }
-      if (!this.serverConn?.connected) {
-        return new Response(
-          this.buildWebChannelListPage(webBase, {
-            flashMessage: "PART に失敗しました: not connected to IRC server",
-            flashTone: "danger",
-          }),
-          { status: 503, headers: { "Content-Type": "text/html; charset=utf-8" } }
-        );
-      }
-      await this.serverConn.send({ command: "PART", params: [channelResult.value] });
-      return new Response(null, {
-        status: 302,
-        headers: { Location: `${webBase}/` },
-      });
+      return handleWebLeave(request, webBase, this.buildWebChannelListPage.bind(this), this.serverConn);
     }
 
     // POST /web/nick — change nick from web UI
     if (request.method === "POST" && (url.pathname === "/web/nick" || url.pathname === "/web/nick/")) {
-      return this.handleWebNick(request, webBase);
+      return handleWebNick(request, webBase, {
+        buildWebChannelListPage: this.buildWebChannelListPage.bind(this),
+        requestNickChange: this.requestNickChange.bind(this),
+      });
     }
 
     // GET /web — channel list
@@ -463,7 +484,7 @@ export class IrcProxyDO implements DurableObject {
     const webMessagesFragmentMatch = url.pathname.match(/^\/web\/(.+)\/messages\/fragment\/?$/);
     if (webMessagesFragmentMatch) {
       if (request.method !== "GET") {
-        return new Response("Method Not Allowed", { status: 405 });
+        return methodNotAllowed();
       }
       return this.renderWebChannelMessagesFragment(
         decodeURIComponent(webMessagesFragmentMatch[1]),
@@ -474,7 +495,7 @@ export class IrcProxyDO implements DurableObject {
     const webMessagesMatch = url.pathname.match(/^\/web\/(.+)\/messages\/?$/);
     if (webMessagesMatch) {
       if (request.method !== "GET") {
-        return new Response("Method Not Allowed", { status: 405 });
+        return methodNotAllowed();
       }
       return this.renderWebChannelMessagesPage(
         decodeURIComponent(webMessagesMatch[1]),
@@ -496,21 +517,24 @@ export class IrcProxyDO implements DurableObject {
         return this.renderWebChannelComposerPage(channel, webBase);
       }
       if (request.method === "POST") {
-        return this.handleWebChannelComposer(request, channel, webBase);
+        return handleWebChannelComposer(request, channel, webBase, {
+          postChannelMessage: this.postChannelMessage.bind(this),
+          renderWebChannelComposerPage: this.renderWebChannelComposerPage.bind(this),
+        });
       }
-      return new Response("Method Not Allowed", { status: 405 });
+      return methodNotAllowed();
     }
 
     // GET /web/:channel
     const webMatch = url.pathname.match(/^\/web\/(.+)\/?$/);
     if (webMatch) {
       if (request.method !== "GET") {
-        return new Response("Method Not Allowed", { status: 405 });
+        return methodNotAllowed();
       }
       return this.renderWebChannelShellPage(decodeURIComponent(webMatch[1]), webBase);
     }
 
-    return new Response("Not found", { status: 404 });
+    return notFound();
   }
 
   /**
@@ -615,226 +639,6 @@ export class IrcProxyDO implements DurableObject {
     }
   }
 
-  // --- API methods ---
-
-  private async handleApiJoin(request: Request): Promise<Response> {
-    let body: { channel?: string };
-    try {
-      body = await request.json();
-    } catch {
-      return Response.json(
-        { error: "invalid JSON" },
-        { status: 400, headers: corsHeaders() }
-      );
-    }
-
-    const channelResult = validateChannelInput(body.channel);
-    if (!channelResult.ok) {
-      return Response.json(
-        { error: channelResult.error },
-        { status: 400, headers: corsHeaders() }
-      );
-    }
-
-    if (!this.serverConn?.connected) {
-      return Response.json(
-        { error: "not connected to IRC server" },
-        { status: 503, headers: corsHeaders() }
-      );
-    }
-
-    await this.serverConn.send({
-      command: "JOIN",
-      params: [channelResult.value],
-    });
-
-    return Response.json({ ok: true, channel: channelResult.value }, { headers: corsHeaders() });
-  }
-
-  private async handleApiLeave(request: Request): Promise<Response> {
-    let body: { channel?: string };
-    try {
-      body = await request.json();
-    } catch {
-      return Response.json(
-        { error: "invalid JSON" },
-        { status: 400, headers: corsHeaders() }
-      );
-    }
-
-    const channelResult = validateChannelInput(body.channel);
-    if (!channelResult.ok) {
-      return Response.json(
-        { error: channelResult.error },
-        { status: 400, headers: corsHeaders() }
-      );
-    }
-
-    if (!this.serverConn?.connected) {
-      return Response.json(
-        { error: "not connected to IRC server" },
-        { status: 503, headers: corsHeaders() }
-      );
-    }
-
-    await this.serverConn.send({
-      command: "PART",
-      params: [channelResult.value],
-    });
-
-    return Response.json({ ok: true, channel: channelResult.value }, { headers: corsHeaders() });
-  }
-
-  private async handleApiPost(request: Request): Promise<Response> {
-    let body: { channel?: string; message?: string; url?: string };
-    try {
-      body = await request.json();
-    } catch {
-      return Response.json(
-        { error: "invalid JSON" },
-        { status: 400, headers: corsHeaders() }
-      );
-    }
-
-    const channelResult = validateChannelInput(body.channel);
-    if (!channelResult.ok) {
-      return Response.json(
-        { error: channelResult.error },
-        { status: 400, headers: corsHeaders() }
-      );
-    }
-
-    let text = body.message || "";
-    let embed: ResolvedUrlEmbed | undefined;
-
-    // URL metadata extraction mode
-    if (!text && body.url) {
-      try {
-        embed = await resolveUrlEmbed(body.url, {
-          xTheme: resolveXEmbedTheme(this.webUiSettings.surfaceColor),
-        });
-      } catch {
-        embed = undefined;
-      }
-
-      try {
-        text = await extractUrlMetadata(body.url, {
-          browserRendering: this.browserRenderingConfig,
-        });
-      } catch {
-        text = body.url;
-      }
-    }
-
-    if (!text) {
-      return Response.json(
-        { error: "missing message or url" },
-        { status: 400, headers: corsHeaders() }
-      );
-    }
-
-    if (!this.serverConn?.connected) {
-      return Response.json(
-        { error: "not connected to IRC server" },
-        { status: 503, headers: corsHeaders() }
-      );
-    }
-
-    const postResult = await this.postChannelMessage(channelResult.value, text, embed);
-    if (!postResult.ok) {
-      return Response.json(
-        { error: postResult.error },
-        { status: postResult.status, headers: corsHeaders() }
-      );
-    }
-
-    return Response.json(
-      { ok: true, message: postResult.message, channel: postResult.channel },
-      { headers: corsHeaders() }
-    );
-  }
-
-  private async handleApiNick(request: Request): Promise<Response> {
-    let body: { nick?: string };
-    try {
-      body = await request.json();
-    } catch {
-      return Response.json(
-        { error: "invalid JSON" },
-        { status: 400, headers: corsHeaders() }
-      );
-    }
-
-    const nickChangeResult = await this.requestNickChange(body.nick);
-    if (!nickChangeResult.ok) {
-      return Response.json({ error: nickChangeResult.error }, { status: nickChangeResult.status, headers: corsHeaders() });
-    }
-    const confirmedNick = nickChangeResult.nick;
-    return Response.json({ ok: true, nick: confirmedNick }, { headers: corsHeaders() });
-  }
-
-  private async handleApiConfig(request: Request): Promise<Response> {
-    let body: unknown;
-    try {
-      body = await request.json();
-    } catch {
-      return Response.json(
-        { error: "invalid JSON" },
-        { status: 400, headers: corsHeaders() }
-      );
-    }
-
-    const configUpdateResult = this.buildPersistedProxyConfigUpdate(this.instanceConfig, body);
-    if (!configUpdateResult.ok) {
-      return Response.json(
-        { error: configUpdateResult.error },
-        { status: configUpdateResult.status, headers: corsHeaders() }
-      );
-    }
-
-    await this.persistProxyConfig(configUpdateResult.config);
-    this.applyResolvedProxyConfig(configUpdateResult.config);
-
-    return Response.json({
-      ok: true,
-      config: {
-        nick: this.config?.server.nick ?? null,
-        autojoin: this.config?.autojoin ?? [],
-      },
-    }, { headers: corsHeaders() });
-  }
-
-  private async handleWebNick(request: Request, webBase: string): Promise<Response> {
-    const formData = await request.formData();
-    const nick = (formData.get("nick") as string | null) ?? "";
-    const nickChangeResult = await this.requestNickChange(nick);
-
-    if (!nickChangeResult.ok) {
-      return new Response(
-        this.buildWebChannelListPage(webBase, {
-          nick,
-          flashMessage: `NICK変更に失敗しました: ${nickChangeResult.error}`,
-          flashTone: "danger",
-        }),
-        {
-          status: nickChangeResult.status,
-          headers: { "Content-Type": "text/html; charset=utf-8" },
-        }
-      );
-    }
-
-    return new Response(
-      this.buildWebChannelListPage(webBase, {
-        nick: nickChangeResult.nick,
-        flashMessage: `NICKを ${nickChangeResult.nick} に変更しました`,
-        flashTone: "info",
-      }),
-      {
-        headers: { "Content-Type": "text/html; charset=utf-8" },
-      }
-    );
-  }
-
   private buildWebChannelListPage(
     webBase: string,
     options: {
@@ -865,70 +669,6 @@ export class IrcProxyDO implements DurableObject {
       nick: config?.nick ?? "",
       autojoin: config?.autojoin?.join("\n") ?? "",
     };
-  }
-
-  private readWebPersistedConfigFormValues(formData: FormData): { nick: string; autojoin: string } {
-    const nickValue = formData.get("nick");
-    const autojoinValue = formData.get("autojoin");
-    return {
-      nick: typeof nickValue === "string" ? nickValue : "",
-      autojoin: typeof autojoinValue === "string" ? autojoinValue : "",
-    };
-  }
-
-  private buildPersistedProxyConfigUpdateFromFormData(
-    currentConfig: ProxyInstanceConfig | undefined,
-    formData: FormData,
-  ):
-    | { ok: true; config?: ProxyInstanceConfig; formValues: { nick: string; autojoin: string } }
-    | { ok: false; error: string; status: number; formValues: { nick: string; autojoin: string } } {
-    const formValues = this.readWebPersistedConfigFormValues(formData);
-    const autojoin = formValues.autojoin
-      .split(/\r?\n/u)
-      .map((channel) => channel.trim())
-      .filter(Boolean);
-    const configUpdateResult = this.buildPersistedProxyConfigUpdate(currentConfig, {
-      nick: formValues.nick,
-      autojoin,
-    });
-
-    return { ...configUpdateResult, formValues };
-  }
-
-  private async handleWebConfig(request: Request, webBase: string): Promise<Response> {
-    const formData = await request.formData();
-    const configUpdateResult = this.buildPersistedProxyConfigUpdateFromFormData(this.instanceConfig, formData);
-
-    if (!configUpdateResult.ok) {
-      return new Response(
-        this.buildWebChannelListPage(webBase, {
-          flashMessage: `接続デフォルト設定の保存に失敗しました: ${configUpdateResult.error}`,
-          flashTone: "danger",
-          configFormValues: configUpdateResult.formValues,
-        }),
-        {
-          status: configUpdateResult.status,
-          headers: { "Content-Type": "text/html; charset=utf-8" },
-        }
-      );
-    }
-
-    await this.persistProxyConfig(configUpdateResult.config);
-    this.applyResolvedProxyConfig(configUpdateResult.config);
-
-    const successMessage = configUpdateResult.config
-      ? "接続デフォルト設定を保存しました"
-      : "接続デフォルト設定をクリアしました";
-    return new Response(
-      this.buildWebChannelListPage(webBase, {
-        flashMessage: successMessage,
-        flashTone: "info",
-        configFormValues: this.buildWebPersistedConfigFormValues(configUpdateResult.config),
-      }),
-      {
-        headers: { "Content-Type": "text/html; charset=utf-8" },
-      }
-    );
   }
 
   private async requestNickChange(nick: string | undefined): Promise<
@@ -990,39 +730,6 @@ export class IrcProxyDO implements DurableObject {
     clearTimeout(this.pendingNickChange.timer);
     this.pendingNickChange.reject(error);
     this.pendingNickChange = null;
-  }
-
-  private handleApiLogs(channel: string): Response {
-    const channelResult = validateChannelInput(channel);
-    if (!channelResult.ok) {
-      return Response.json(
-        { error: channelResult.error },
-        { status: 400, headers: corsHeaders() }
-      );
-    }
-    const logs = this.web.getChannelLogs(channelResult.value);
-    if (logs === null) {
-      return Response.json(
-        { error: "channel not found" },
-        { status: 404, headers: corsHeaders() }
-      );
-    }
-    return Response.json({ channel: channelResult.value, messages: logs }, { headers: corsHeaders() });
-  }
-
-  private async handleApiDisconnect(): Promise<Response> {
-    if (!this.serverConn?.connected) {
-      return Response.json(
-        { error: "not connected to IRC server" },
-        { status: 503, headers: corsHeaders() }
-      );
-    }
-
-    this.suppressAutoReconnectOnClose = true;
-    await this.state.storage.deleteAlarm();
-    await this.serverConn.close();
-
-    return Response.json({ ok: true }, { headers: corsHeaders() });
   }
 
   // --- Private methods ---
@@ -1099,38 +806,6 @@ export class IrcProxyDO implements DurableObject {
       status,
       headers: { "Content-Type": "text/html; charset=utf-8" },
     });
-  }
-
-  private async handleWebChannelComposer(
-    request: Request,
-    channel: string,
-    webBase: string
-  ): Promise<Response> {
-    const formData = await request.formData();
-    const messageValue = (formData.get("message") as string | null) ?? "";
-    const postResult = await this.postChannelMessage(channel, messageValue);
-
-    if (!postResult.ok) {
-      return this.renderWebChannelComposerPage(
-        channel,
-        webBase,
-        messageValue,
-        `送信に失敗しました: ${postResult.error}`,
-        "danger",
-        postResult.status,
-        false
-      );
-    }
-
-    return this.renderWebChannelComposerPage(
-      channel,
-      webBase,
-      "",
-      "",
-      "info",
-      200,
-      true
-    );
   }
 
   private async postChannelMessage(
@@ -1622,48 +1297,6 @@ export class IrcProxyDO implements DurableObject {
     return shouldReconnect;
   }
 
-  private async handleWebLogin(
-    request: Request,
-    proxyPrefix: string,
-    webBase: string
-  ): Promise<Response> {
-    if (!this.config?.password) {
-      return new Response(null, {
-        status: 302,
-        headers: { Location: `${webBase}/` },
-      });
-    }
-
-    const formData = await request.formData();
-    const password = (formData.get("password") as string | null)?.trim() ?? "";
-    if (password !== this.config.password) {
-      return this.renderWebLoginPage(`${webBase}/login`, "パスワードが違います", 401);
-    }
-
-    const cookieValue = await this.buildWebAuthCookieValue(proxyPrefix);
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location: `${webBase}/`,
-        "Set-Cookie": this.buildWebAuthCookie(cookieValue, `${proxyPrefix}/web`, request.url),
-      },
-    });
-  }
-
-  private async handleWebLogout(
-    request: Request,
-    proxyPrefix: string,
-    webBase: string
-  ): Promise<Response> {
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location: `${webBase}/login`,
-        "Set-Cookie": this.buildExpiredWebAuthCookie(`${proxyPrefix}/web`, request.url),
-      },
-    });
-  }
-
   private async loadPersistedWebLogs(): Promise<void> {
     const logs = await this.state.storage.get<PersistedWebLogs>(webLogsStorageKey);
     this.web.hydrateLogs(logs ?? null);
@@ -1671,7 +1304,7 @@ export class IrcProxyDO implements DurableObject {
 
   private async loadPersistedWebUiSettings(): Promise<void> {
     const stored = await this.state.storage.get<Partial<WebUiSettings>>(webUiSettingsStorageKey);
-    this.webUiSettings = this.normalizeStoredWebUiSettings(stored);
+    this.webUiSettings = normalizeStoredWebUiSettings(stored);
   }
 
   private async persistCurrentWebLogs(): Promise<void> {
@@ -1759,219 +1392,9 @@ export class IrcProxyDO implements DurableObject {
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  private async isWebAuthenticated(request: Request, proxyPrefix: string): Promise<boolean> {
-    if (!this.config?.password) {
-      return true;
-    }
-
-    const cookies = this.parseCookies(request.headers.get("Cookie"));
-    const actual = cookies.get(webAuthCookieName);
-    if (!actual) {
-      return false;
-    }
-
-    const expected = await this.buildWebAuthCookieValue(proxyPrefix);
-    return actual === expected;
-  }
-
   private canEditWebSettings(): boolean {
     return Boolean(this.config?.password);
   }
-
-  private parseCookies(cookieHeader: string | null): Map<string, string> {
-    const cookies = new Map<string, string>();
-    if (!cookieHeader) {
-      return cookies;
-    }
-
-    for (const entry of cookieHeader.split(";")) {
-      const [rawName, ...rawValue] = entry.trim().split("=");
-      if (!rawName) continue;
-      cookies.set(rawName, rawValue.join("="));
-    }
-    return cookies;
-  }
-
-  private async buildWebAuthCookieValue(proxyPrefix: string): Promise<string> {
-    const source = `${proxyPrefix}:${this.config?.password ?? ""}`;
-    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(source));
-    return Array.from(new Uint8Array(digest))
-      .map((value) => value.toString(16).padStart(2, "0"))
-      .join("");
-  }
-
-  private buildWebAuthCookie(value: string, path: string, requestUrl: string): string {
-    const isSecure = new URL(requestUrl).protocol === "https:";
-    return [
-      `${webAuthCookieName}=${value}`,
-      `Path=${path}`,
-      "HttpOnly",
-      "SameSite=Strict",
-      ...(isSecure ? ["Secure"] : []),
-    ].join("; ");
-  }
-
-  private buildExpiredWebAuthCookie(path: string, requestUrl: string): string {
-    const isSecure = new URL(requestUrl).protocol === "https:";
-    return [
-      `${webAuthCookieName}=`,
-      `Path=${path}`,
-      "HttpOnly",
-      "SameSite=Strict",
-      "Max-Age=0",
-      ...(isSecure ? ["Secure"] : []),
-    ].join("; ");
-  }
-
-  private async handleWebSettings(
-    request: Request,
-    webBase: string
-  ): Promise<Response> {
-    const formData = await request.formData();
-    const validation = this.validateWebUiSettingsForm(formData);
-    if (validation.errorMessage) {
-      return this.renderWebSettingsPage(webBase, validation.settings, validation.errorMessage, 400);
-    }
-
-    await this.persistWebUiSettings(validation.settings);
-    return new Response(null, {
-      status: 302,
-      headers: { Location: `${webBase}/` },
-    });
-  }
-
-  private validateWebUiSettingsForm(formData: FormData): {
-    settings: WebUiSettings;
-    errorMessage?: string;
-  } {
-    const draftSettings: WebUiSettings = { ...this.webUiSettings };
-    const fontFamily = (formData.get("fontFamily") as string | null)?.trim() ?? "";
-    if (!fontFamily || fontFamily.length > 200) {
-      return {
-        settings: { ...draftSettings, fontFamily: fontFamily || draftSettings.fontFamily },
-        errorMessage: "Font family は 1〜200 文字で入力してください",
-      };
-    }
-    draftSettings.fontFamily = fontFamily;
-
-    const fontSizeRaw = (formData.get("fontSizePx") as string | null)?.trim() ?? "";
-    const fontSizePx = Number.parseInt(fontSizeRaw, 10);
-    if (!Number.isInteger(fontSizePx) || fontSizePx < 10 || fontSizePx > 32) {
-      return {
-        settings: { ...draftSettings },
-        errorMessage: "Font size は 10〜32 の整数で入力してください",
-      };
-    }
-    draftSettings.fontSizePx = fontSizePx;
-
-    for (const fieldName of webUiColorFieldNames) {
-      const colorValue = (formData.get(fieldName) as string | null)?.trim() ?? "";
-      if (!/^#[0-9A-Fa-f]{6}$/.test(colorValue)) {
-        return {
-          settings: { ...draftSettings },
-          errorMessage: `${fieldName} は #RRGGBB 形式で入力してください`,
-        };
-      }
-      draftSettings[fieldName] = colorValue;
-    }
-
-    const displayOrder = (formData.get("displayOrder") as string | null)?.trim() ?? "";
-    if (!isWebDisplayOrder(displayOrder)) {
-      return {
-        settings: { ...draftSettings },
-        errorMessage: "Display order は asc または desc を指定してください",
-      };
-    }
-    draftSettings.displayOrder = displayOrder;
-
-    const extraCss = (formData.get("extraCss") as string | null) ?? "";
-    const customCssResult = sanitizeCustomCss(extraCss);
-    if (!customCssResult.ok) {
-      return {
-        settings: { ...draftSettings },
-        errorMessage: customCssResult.error,
-      };
-    }
-    draftSettings.extraCss = customCssResult.value;
-
-    const highlightKeywords = (formData.get("highlightKeywords") as string | null) ?? "";
-    if (highlightKeywords.length > 2048) {
-      return {
-        settings: { ...draftSettings },
-        errorMessage: "キーワード強調は 2KB 以下にしてください",
-      };
-    }
-    draftSettings.highlightKeywords = highlightKeywords;
-
-    const dimKeywords = (formData.get("dimKeywords") as string | null) ?? "";
-    if (dimKeywords.length > 2048) {
-      return {
-        settings: { ...draftSettings },
-        errorMessage: "キーワードDIMは 2KB 以下にしてください",
-      };
-    }
-    draftSettings.dimKeywords = dimKeywords;
-    draftSettings.enableInlineUrlPreview = formData.get("enableInlineUrlPreview") !== null;
-
-    return {
-      settings: buildWebUiSettings(draftSettings),
-    };
-  }
-
-  private normalizeStoredWebUiSettings(stored?: Partial<WebUiSettings>): WebUiSettings {
-    if (!stored) {
-      return { ...DEFAULT_WEB_UI_SETTINGS };
-    }
-
-    const isValidColor = (value: string | undefined): value is string => (
-      typeof value === "string" && /^#[0-9A-Fa-f]{6}$/.test(value)
-    );
-    const fontFamily = typeof stored.fontFamily === "string" && stored.fontFamily.trim() && stored.fontFamily.length <= 200
-      ? stored.fontFamily.trim()
-      : DEFAULT_WEB_UI_SETTINGS.fontFamily;
-    const fontSizePx = Number.isInteger(stored.fontSizePx) && stored.fontSizePx! >= 10 && stored.fontSizePx! <= 32
-      ? stored.fontSizePx!
-      : DEFAULT_WEB_UI_SETTINGS.fontSizePx;
-    const displayOrder = stored.displayOrder && isWebDisplayOrder(stored.displayOrder)
-      ? stored.displayOrder
-      : DEFAULT_WEB_UI_SETTINGS.displayOrder;
-    const extraCss = typeof stored.extraCss === "string"
-      ? sanitizeStoredCustomCss(stored.extraCss)
-      : DEFAULT_WEB_UI_SETTINGS.extraCss;
-    const highlightKeywords = typeof stored.highlightKeywords === "string" && stored.highlightKeywords.length <= 2048
-      ? stored.highlightKeywords
-      : DEFAULT_WEB_UI_SETTINGS.highlightKeywords;
-    const dimKeywords = typeof stored.dimKeywords === "string" && stored.dimKeywords.length <= 2048
-      ? stored.dimKeywords
-      : DEFAULT_WEB_UI_SETTINGS.dimKeywords;
-    const enableInlineUrlPreview = typeof stored.enableInlineUrlPreview === "boolean"
-      ? stored.enableInlineUrlPreview
-      : DEFAULT_WEB_UI_SETTINGS.enableInlineUrlPreview;
-
-    return buildWebUiSettings({
-      fontFamily,
-      fontSizePx,
-      textColor: isValidColor(stored.textColor) ? stored.textColor : LIGHT_WEB_UI_COLOR_PRESET.textColor,
-      surfaceColor: isValidColor(stored.surfaceColor) ? stored.surfaceColor : LIGHT_WEB_UI_COLOR_PRESET.surfaceColor,
-      surfaceAltColor: isValidColor(stored.surfaceAltColor) ? stored.surfaceAltColor : LIGHT_WEB_UI_COLOR_PRESET.surfaceAltColor,
-      accentColor: isValidColor(stored.accentColor) ? stored.accentColor : LIGHT_WEB_UI_COLOR_PRESET.accentColor,
-      borderColor: isValidColor(stored.borderColor) ? stored.borderColor : LIGHT_WEB_UI_COLOR_PRESET.borderColor,
-      usernameColor: isValidColor(stored.usernameColor) ? stored.usernameColor : LIGHT_WEB_UI_COLOR_PRESET.usernameColor,
-      timestampColor: isValidColor(stored.timestampColor) ? stored.timestampColor : LIGHT_WEB_UI_COLOR_PRESET.timestampColor,
-      highlightColor: isValidColor(stored.highlightColor) ? stored.highlightColor : LIGHT_WEB_UI_COLOR_PRESET.highlightColor,
-      buttonColor: isValidColor(stored.buttonColor) ? stored.buttonColor : LIGHT_WEB_UI_COLOR_PRESET.buttonColor,
-      buttonTextColor: isValidColor(stored.buttonTextColor) ? stored.buttonTextColor : LIGHT_WEB_UI_COLOR_PRESET.buttonTextColor,
-      selfColor: isValidColor(stored.selfColor) ? stored.selfColor : LIGHT_WEB_UI_COLOR_PRESET.selfColor,
-      mutedTextColor: isValidColor(stored.mutedTextColor) ? stored.mutedTextColor : LIGHT_WEB_UI_COLOR_PRESET.mutedTextColor,
-      keywordColor: isValidColor(stored.keywordColor) ? stored.keywordColor : LIGHT_WEB_UI_COLOR_PRESET.keywordColor,
-      displayOrder,
-      extraCss,
-      highlightKeywords,
-      dimKeywords,
-      enableInlineUrlPreview,
-    });
-  }
-
   private renderWebSettingsPage(
     webBase: string,
     settings = this.webUiSettings,
@@ -2015,13 +1438,6 @@ export class IrcProxyDO implements DurableObject {
     });
   }
 
-  private redirectToWebLogin(webBase: string): Response {
-    return new Response(null, {
-      status: 302,
-      headers: { Location: `${webBase}/login` },
-    });
-  }
-
   private renderWebManifest(webBase: string): Response {
     const manifest = {
       name: "apricot",
@@ -2060,13 +1476,5 @@ function buildBrowserRenderingConfig(env: Env): BrowserRenderingConfig | undefin
   return {
     accountId,
     apiToken,
-  };
-}
-
-function corsHeaders(): HeadersInit {
-  return {
-    "Access-Control-Allow-Origin": "*",
-    "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization",
   };
 }
