@@ -15,6 +15,8 @@ Cloudflare Workers + Durable Objects で動作します。
 - REST API 経由での操作（チャンネル参加・メッセージ投稿・nick 変更）
 - URL 投稿時のページタイトル自動取得（Twitter/X・YouTube oEmbed 対応）
 - Web UI の URL 画像 / カード / 埋め込みプレビュー（常時表示または hover / 長押し）
+![](./images/apricot_youtube.png)
+![](./images/apricot_x.png)
 
 ---
 
@@ -236,6 +238,8 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/post \
 #### Chrome 拡張から現在ページを投稿する
 
 `ChromeExtension/` 配下に、現在開いているページのタイトルと URL を `message` として送る Chrome 拡張のサンプルを含めています。`url` モードは使わず、拡張側で `タイトル URL >選択テキスト 追加メッセージ` を組み立てて `POST /proxy/:id/api/post` へ送信します。
+
+![](./images/apricot_chrome.png)
 
 1. Chrome の `chrome://extensions/` を開く
 2. 「デベロッパー モード」を有効にする
