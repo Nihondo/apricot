@@ -30,6 +30,7 @@ import {
 import {
   type BrowserRenderingConfig,
   extractUrlMetadata,
+  resolveMessageEmbed,
   resolveUrlEmbed,
   type ResolvedUrlEmbed,
 } from "./modules/url-metadata";
@@ -1156,6 +1157,21 @@ export class IrcProxyDO implements DurableObject {
 
     if (!this.serverConn?.connected) {
       return { ok: false, error: "not connected to IRC server", status: 503 };
+    }
+
+    // enableRemoteUrlPreview が有効で embed が未解決の場合に自動解決する。
+    // 接続チェック後に実行することで、未接続時は外部 fetch を行わず即座に 503 を返す。
+    // 呼び出し側（handleApiPost の URL モードなど）が既に embed を渡している場合は二重解決しない。
+    // Note: IRC サーバが自分の発言をエコーバックする構成では ss_privmsg の受信側でも
+    //       resolveMessageEmbed が走るため、同じ URL への fetch が二重になる場合がある。
+    if (embed === undefined && this.config?.enableRemoteUrlPreview) {
+      try {
+        embed = await resolveMessageEmbed(trimmedMessage, {
+          xTheme: resolveXEmbedTheme(this.webUiSettings.surfaceColor),
+        });
+      } catch {
+        embed = undefined;
+      }
     }
 
     await this.serverConn.send({

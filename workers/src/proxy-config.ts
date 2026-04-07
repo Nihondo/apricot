@@ -14,6 +14,12 @@ export interface ProxyConfig {
   autojoin?: string[];
   autoConnectOnStartup: boolean;
   autoReconnectOnDisconnect: boolean;
+  /**
+   * 外部 URL のプレビュー取得を行う総合スイッチ。
+   * 有効にすると、他人からの受信メッセージ（ss_privmsg/ss_notice）に加え、
+   * Web composer や API 経由で投稿した自分のメッセージにも URL の embed 解決が適用される。
+   * デフォルト false（外部 fetch を opt-in にして SSRF リスクを最小化）。
+   */
   enableRemoteUrlPreview: boolean;
 }
 

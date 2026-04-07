@@ -263,8 +263,13 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/post \
 - **一般 URL**: Cloudflare Browser Rendering のシークレットが設定されていればレンダリング後の `<title>` を優先取得。未設定または取得失敗時は HTML の `<title>` タグを取得
 - **フォールバック**: メタデータを取れない場合は URL をそのまま投稿
 
-受信メッセージに含まれる URL の自動プレビュー解決は、既定では無効です。必要な場合だけ `ENABLE_REMOTE_URL_PREVIEW=true` を設定してください。
-この制限は外部 fetch の濫用を抑えるためで、`POST /api/post` の `url` 指定による投稿は従来どおりメタデータ取得を行います。
+URL の自動プレビュー解決は、既定では無効です。必要な場合だけ `ENABLE_REMOTE_URL_PREVIEW=true` を設定してください。
+この設定は外部 fetch の濫用を抑えるためのグローバルスイッチで、有効にすると次の経路すべてに適用されます。
+
+- 他人からの受信メッセージ（`ss_privmsg` / `ss_notice`）
+- Web composer や `POST /api/post` の `message` 指定による自分の投稿
+
+なお `POST /api/post` の `url` 指定による投稿は本フラグに依らず常にメタデータ取得を行います。
 
 リクエストボディ:
 
@@ -398,7 +403,7 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 | `IRC_AUTO_RECONNECT_ON_DISCONNECT` | ─ | `false` | IRC 切断時に 5 秒後の自動再接続を有効化（API 手動切断時は抑制） |
 | `IRC_AUTOJOIN` | ─ | ─ | 自動参加チャンネルのデフォルト値（カンマ区切り、例: `#general,#test`）。プロキシ ID ごとに `PUT /api/config` で上書き可能 |
 | `IRC_ENCODING` | ─ | `utf-8` | IRC サーバーの文字コード（例: `iso-2022-jp`、`euc-jp`、`shift_jis`） |
-| `ENABLE_REMOTE_URL_PREVIEW` | ─ | `false` | 受信 IRC メッセージに含まれる URL の自動プレビュー解決を有効化 |
+| `ENABLE_REMOTE_URL_PREVIEW` | ─ | `false` | URL の自動プレビュー解決を有効化する総合スイッチ。受信メッセージ・自分の投稿（Web composer / API message）に適用。`POST /api/post` の `url` 指定は常に有効 |
 | `KEEPALIVE_INTERVAL` | ─ | `60` | DO keepalive 間隔（秒） |
 | `TIMEZONE_OFFSET` | ─ | `9` | Web UI の時刻表示オフセット（時間単位、例: JST は `9`） |
 | `WEB_LOG_MAX_LINES` | ─ | `200` | チャンネルごとのログ保持件数 |

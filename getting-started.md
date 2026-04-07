@@ -328,7 +328,7 @@ curl -X POST https://your-apricot.workers.dev/proxy/bot/api/post \
 | `IRC_AUTO_RECONNECT_ON_DISCONNECT` | ─ | `false` | 切断時に自動再接続 |
 | `IRC_AUTOJOIN` | ─ | ─ | 自動参加チャンネル（カンマ区切り） |
 | `IRC_ENCODING` | ─ | `utf-8` | 文字コード |
-| `ENABLE_REMOTE_URL_PREVIEW` | ─ | `false` | 受信メッセージの URL 自動プレビュー |
+| `ENABLE_REMOTE_URL_PREVIEW` | ─ | `false` | URL 自動プレビュー取得の総合スイッチ（受信・自分の投稿に適用） |
 | `KEEPALIVE_INTERVAL` | ─ | `60` | キープアライブ間隔（秒） |
 | `TIMEZONE_OFFSET` | ─ | `9` | タイムゾーンオフセット |
 | `WEB_LOG_MAX_LINES` | ─ | `200` | ログ保持件数 |

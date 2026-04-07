@@ -1332,6 +1332,151 @@ describe("IrcProxyDO web log persistence", () => {
     });
   });
 
+  it("resolves embed via resolveMessageEmbed for API message posts when ENABLE_REMOTE_URL_PREVIEW is on", async () => {
+    const embed = {
+      kind: "card" as const,
+      sourceUrl: "https://example.com/post",
+      imageUrl: "https://example.com/card.jpg",
+      title: "Example title",
+      siteName: "Example",
+    };
+    resolveMessageEmbedMock.mockResolvedValue(embed);
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ ENABLE_REMOTE_URL_PREVIEW: "true" })
+    );
+    await state.initPromise;
+
+    const send = vi.fn().mockResolvedValue(undefined);
+    (proxy as any).serverConn = { connected: true, send };
+    (proxy as any).nick = "apricot";
+
+    const response = await proxy.fetch(new Request("https://example.com/api/post", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel: "#general", message: "check https://example.com/post" }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(resolveMessageEmbedMock).toHaveBeenCalledTimes(1);
+    const logs = state.storage.read<PersistedWebLogs>(webLogsStorageKey);
+    expect(logs?.["#general"]?.at(-1)).toMatchObject({
+      type: "self",
+      text: "check https://example.com/post",
+      embed,
+    });
+  });
+
+  it("does not call resolveMessageEmbed when embed is already resolved by the caller (API url mode)", async () => {
+    const embed = {
+      kind: "card" as const,
+      sourceUrl: "https://example.com/post",
+      title: "Example title",
+      siteName: "Example",
+    };
+    resolveUrlEmbedMock.mockResolvedValue(embed);
+    extractUrlMetadataMock.mockResolvedValue("Example title https://example.com/post");
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ ENABLE_REMOTE_URL_PREVIEW: "true" })
+    );
+    await state.initPromise;
+
+    const send = vi.fn().mockResolvedValue(undefined);
+    (proxy as any).serverConn = { connected: true, send };
+    (proxy as any).nick = "apricot";
+
+    const response = await proxy.fetch(new Request("https://example.com/api/post", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel: "#general", url: "https://example.com/post" }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(resolveMessageEmbedMock).not.toHaveBeenCalled();
+    const logs = state.storage.read<PersistedWebLogs>(webLogsStorageKey);
+    expect(logs?.["#general"]?.at(-1)).toMatchObject({ embed });
+  });
+
+  it("returns 503 immediately without calling resolveMessageEmbed when not connected and ENABLE_REMOTE_URL_PREVIEW is on", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ ENABLE_REMOTE_URL_PREVIEW: "true" })
+    );
+    await state.initPromise;
+
+    // serverConn is not set (disconnected)
+    (proxy as any).nick = "apricot";
+
+    const response = await proxy.fetch(new Request("https://example.com/api/post", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel: "#general", message: "check https://example.com/post" }),
+    }));
+
+    expect(response.status).toBe(503);
+    expect(resolveMessageEmbedMock).not.toHaveBeenCalled();
+  });
+
+  it("does not call resolveMessageEmbed for API message posts when ENABLE_REMOTE_URL_PREVIEW is off", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv()
+    );
+    await state.initPromise;
+
+    const send = vi.fn().mockResolvedValue(undefined);
+    (proxy as any).serverConn = { connected: true, send };
+    (proxy as any).nick = "apricot";
+
+    const response = await proxy.fetch(new Request("https://example.com/api/post", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel: "#general", message: "check https://example.com/post" }),
+    }));
+
+    expect(response.status).toBe(200);
+    expect(resolveMessageEmbedMock).not.toHaveBeenCalled();
+    const logs = state.storage.read<PersistedWebLogs>(webLogsStorageKey);
+    expect(logs?.["#general"]?.at(-1)).toMatchObject({
+      type: "self",
+      text: "check https://example.com/post",
+    });
+    expect(logs?.["#general"]?.at(-1)?.embed).toBeUndefined();
+  });
+
+  it("stores message without embed when resolveMessageEmbed throws", async () => {
+    resolveMessageEmbedMock.mockRejectedValue(new Error("network error"));
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ ENABLE_REMOTE_URL_PREVIEW: "true" })
+    );
+    await state.initPromise;
+
+    const send = vi.fn().mockResolvedValue(undefined);
+    (proxy as any).serverConn = { connected: true, send };
+    (proxy as any).nick = "apricot";
+
+    const response = await proxy.fetch(new Request("https://example.com/api/post", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ channel: "#general", message: "check https://example.com/post" }),
+    }));
+
+    expect(response.status).toBe(200);
+    const logs = state.storage.read<PersistedWebLogs>(webLogsStorageKey);
+    expect(logs?.["#general"]?.at(-1)).toMatchObject({
+      type: "self",
+      text: "check https://example.com/post",
+    });
+    expect(logs?.["#general"]?.at(-1)?.embed).toBeUndefined();
+  });
+
   it("clears the cookie on logout", async () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
