@@ -32,6 +32,7 @@ import { sanitizeCustomCss } from "../custom-css";
 // ---------------------------------------------------------------------------
 
 export interface StoredMessage {
+  sequence: number;
   time: number; // Unix ms
   type: "privmsg" | "notice" | "join" | "part" | "quit" | "kick" | "nick" | "topic" | "mode" | "self";
   nick: string;
@@ -39,11 +40,23 @@ export interface StoredMessage {
   embed?: ResolvedUrlEmbed;
 }
 
+type PersistedStoredMessage = Omit<StoredMessage, "sequence"> & {
+  sequence?: number;
+};
+
 /**
  * JSON-serializable snapshot of per-channel web logs keyed by lowercase channel.
  */
-export type PersistedWebLogs = Record<string, StoredMessage[]>;
+export type PersistedWebLogs = Record<string, PersistedStoredMessage[]>;
 export type WebDisplayOrder = "asc" | "desc";
+type FragmentRenderMode = "full" | "delta";
+
+interface RenderedChannelMessagesFragment {
+  html: string;
+  latestSequence: number;
+  startSequence: number;
+  mode: FragmentRenderMode;
+}
 
 export interface WebUiColorSettings {
   textColor: string;
@@ -125,24 +138,28 @@ const SETTINGS_PREVIEW_HIGHLIGHT_KEYWORDS = ["重要ワード"];
 const SETTINGS_PREVIEW_DIM_KEYWORDS = ["log noise"];
 const SETTINGS_PREVIEW_MESSAGES: ReadonlyArray<StoredMessage> = [
   {
+    sequence: 1,
     time: (9 * 60 + 41) * 60_000,
     type: "self",
     nick: SETTINGS_PREVIEW_SELF_NICK,
     text: "プレビュー表示を確認します",
   },
   {
+    sequence: 2,
     time: (9 * 60 + 42) * 60_000,
     type: "privmsg",
     nick: "alice",
     text: "資料は https://example.com/docs にあります",
   },
   {
+    sequence: 3,
     time: (9 * 60 + 43) * 60_000,
     type: "privmsg",
     nick: "bob",
     text: "重要ワード を含むメッセージです",
   },
   {
+    sequence: 4,
     time: (9 * 60 + 44) * 60_000,
     type: "notice",
     nick: "server",
@@ -1239,7 +1256,7 @@ function buildComposerOnLoadScript(shouldReloadMessages: boolean): string {
 function buildMessagesPageScript(
   channel: string,
   webUiSettings: WebUiSettings,
-  initialRevision = 0
+  initialSequence = 0
 ): string {
   const serializedChannel = JSON.stringify(channel);
   const shouldAutoStick = webUiSettings.displayOrder === "asc";
@@ -1249,10 +1266,9 @@ var apricotNormalizedUpdateChannel = apricotUpdateChannel.toLowerCase();
 var apricotShouldAutoStick = ${shouldAutoStick ? "true" : "false"};
 var apricotRefreshInFlight = false;
 var apricotRefreshQueued = false;
-var apricotLatestRevision = ${initialRevision};
+var apricotLatestSequence = ${initialSequence};
 var apricotUpdateSocket = null;
 var apricotUpdateSocketGeneration = 0;
-var apricotShouldForceRefreshOnNextChannelUpdate = false;
 var apricotReconnectDelayMs = 1000;
 var apricotReconnectTimer = 0;
 var apricotHeartbeatTimer = 0;
@@ -1274,22 +1290,29 @@ function getFragmentUrl() {
   return window.location.pathname.replace(/\\/messages\\/?$/, "/messages/fragment");
 }
 
+function getFragmentRequestUrl() {
+  return getFragmentUrl() + "?since=" + encodeURIComponent(String(apricotLatestSequence));
+}
+
 function getUpdatesUrl() {
   var path = window.location.pathname.replace(/\\/messages\\/?$/, "/updates");
   var protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
   return protocol + "//" + window.location.host + path;
 }
 
-function isValidRevision(revision) {
-  return Number.isFinite(revision) && revision > 0;
+function isValidSequence(sequence) {
+  return Number.isFinite(sequence) && sequence >= 0;
 }
 
-function updateKnownRevision(response) {
-  var revision = Number(response.headers.get("X-Apricot-Channel-Revision") || "0");
-  if (!isValidRevision(revision)) {
-    return;
-  }
-  apricotLatestRevision = Math.max(apricotLatestRevision, revision);
+function readFragmentMetadata(response) {
+  var latestSequence = Number(response.headers.get("X-Apricot-Channel-Sequence") || "0");
+  var startSequence = Number(response.headers.get("X-Apricot-Fragment-Start-Sequence") || "0");
+  var mode = response.headers.get("X-Apricot-Fragment-Mode") || "full";
+  return {
+    latestSequence: isValidSequence(latestSequence) ? latestSequence : apricotLatestSequence,
+    startSequence: isValidSequence(startSequence) ? startSequence : 0,
+    mode: mode === "delta" ? "delta" : "full"
+  };
 }
 
 function debugUpdateSocket(message, socketGeneration) {
@@ -1315,6 +1338,33 @@ function applyMessagesMarkup(html) {
   if (typeof window.initializeApricotPreview === "function") {
     window.initializeApricotPreview();
   }
+}
+
+function applyMessagesDelta(html) {
+  var shell = getMessagesShell();
+  if (!shell || !html) {
+    return;
+  }
+  var template = document.createElement("template");
+  var deltaRoot = document.createElement("div");
+  template.innerHTML = html;
+  deltaRoot.appendChild(template.content);
+  if (apricotShouldAutoStick) {
+    shell.appendChild(deltaRoot);
+  } else {
+    shell.prepend(deltaRoot);
+  }
+  if (typeof window.apricotRefreshRichEmbeds === "function") {
+    window.apricotRefreshRichEmbeds(deltaRoot);
+  }
+  while (deltaRoot.firstChild) {
+    if (apricotShouldAutoStick) {
+      shell.insertBefore(deltaRoot.firstChild, deltaRoot);
+    } else {
+      shell.insertBefore(deltaRoot.lastChild, deltaRoot);
+    }
+  }
+  deltaRoot.remove();
 }
 
 function resetHeartbeatState() {
@@ -1352,7 +1402,7 @@ async function refreshMessages() {
   }
 
   try {
-    var response = await fetch(getFragmentUrl(), {
+    var response = await fetch(getFragmentRequestUrl(), {
       credentials: "same-origin",
       cache: "no-store",
       headers: { "X-Requested-With": "apricot-fetch" }
@@ -1360,8 +1410,16 @@ async function refreshMessages() {
     if (!response.ok) {
       throw new Error("Failed to refresh messages: " + response.status);
     }
-    updateKnownRevision(response);
-    applyMessagesMarkup(await response.text());
+    var fragmentMetadata = readFragmentMetadata(response);
+    var responseText = await response.text();
+    var shouldApplyDelta = fragmentMetadata.mode === "delta"
+      && fragmentMetadata.startSequence === apricotLatestSequence;
+    if (shouldApplyDelta) {
+      applyMessagesDelta(responseText);
+    } else {
+      applyMessagesMarkup(responseText);
+    }
+    apricotLatestSequence = fragmentMetadata.latestSequence;
     if (shouldStickAfterRefresh && typeof runtime.scheduleBottomStick === "function") {
       runtime.scheduleBottomStick();
       if (typeof runtime.bindPendingImages === "function") {
@@ -1395,23 +1453,11 @@ function handleUpdateMessage(event, socketGeneration) {
       return;
     }
     markSocketHealthy();
-    var revision = Number(payload.revision || "0");
-    if (apricotShouldForceRefreshOnNextChannelUpdate) {
-      apricotShouldForceRefreshOnNextChannelUpdate = false;
-      apricotLatestRevision = isValidRevision(revision) ? revision : 0;
-      debugUpdateSocket(
-        "force refresh after reconnect revision=" + String(apricotLatestRevision),
-        socketGeneration
-      );
-      void refreshMessages();
+    var nextSequence = Number(payload.sequence || "0");
+    if (!isValidSequence(nextSequence) || nextSequence <= apricotLatestSequence) {
       return;
     }
-    if (isValidRevision(revision)) {
-      if (revision <= apricotLatestRevision) {
-        return;
-      }
-      apricotLatestRevision = revision;
-    }
+    debugUpdateSocket("channel update sequence=" + String(nextSequence), socketGeneration);
     void refreshMessages();
   } catch (error) {
     console.error(error);
@@ -1543,7 +1589,6 @@ function connectUpdatesSocket() {
 
   apricotUpdateSocketGeneration += 1;
   var socketGeneration = apricotUpdateSocketGeneration;
-  apricotShouldForceRefreshOnNextChannelUpdate = socketGeneration > 1;
   clearHeartbeatTimer();
   resetHeartbeatState();
   debugUpdateSocket("connect attempt", socketGeneration);
@@ -1897,6 +1942,7 @@ export function createWebModule(
   getWebUiSettings: () => WebUiSettings = () => DEFAULT_WEB_UI_SETTINGS,
 ) {
   const store: MessageBufferStore = new Map();
+  const channelSequences = new Map<string, number>();
 
   function getBuffer(channel: string): StoredMessage[] {
     const key = channel.toLowerCase();
@@ -1908,12 +1954,37 @@ export function createWebModule(
     return buf;
   }
 
-  function pushMessage(channel: string, msg: StoredMessage): void {
+  function getNextChannelSequence(channel: string): number {
+    const normalizedChannel = channel.toLowerCase();
+    const nextSequence = (channelSequences.get(normalizedChannel) ?? 0) + 1;
+    channelSequences.set(normalizedChannel, nextSequence);
+    return nextSequence;
+  }
+
+  function normalizeStoredMessage(
+    msg: PersistedStoredMessage,
+    fallbackSequence: number
+  ): StoredMessage {
+    const rawSequence = typeof msg.sequence === "number" && Number.isFinite(msg.sequence)
+      ? Math.trunc(msg.sequence)
+      : 0;
+    return {
+      ...msg,
+      sequence: rawSequence > 0 ? rawSequence : fallbackSequence,
+    };
+  }
+
+  function pushMessage(channel: string, msg: Omit<StoredMessage, "sequence">): StoredMessage {
     const buf = getBuffer(channel);
-    buf.push(msg);
+    const storedMessage: StoredMessage = {
+      ...msg,
+      sequence: getNextChannelSequence(channel),
+    };
+    buf.push(storedMessage);
     if (buf.length > maxLines) {
       buf.splice(0, buf.length - maxLines);
     }
+    return storedMessage;
   }
 
   async function persistSnapshot(): Promise<void> {
@@ -1921,13 +1992,13 @@ export function createWebModule(
     await persistLogs(snapshotLogs());
   }
 
-  async function appendMessage(channel: string, msg: StoredMessage): Promise<void> {
+  async function appendMessage(channel: string, msg: Omit<StoredMessage, "sequence">): Promise<void> {
     pushMessage(channel, msg);
     await persistSnapshot();
     onChannelLogsChanged?.([channel]);
   }
 
-  async function appendMessages(entries: Array<[string, StoredMessage]>): Promise<void> {
+  async function appendMessages(entries: Array<[string, Omit<StoredMessage, "sequence">]>): Promise<void> {
     if (entries.length === 0) return;
     for (const [channel, msg] of entries) {
       pushMessage(channel, msg);
@@ -1942,7 +2013,7 @@ export function createWebModule(
     text: string,
     embed?: ResolvedUrlEmbed,
     shouldResolveEmbed = false,
-  ): Promise<StoredMessage> {
+  ): Promise<Omit<StoredMessage, "sequence">> {
     return {
       time: Date.now(),
       type,
@@ -1991,7 +2062,7 @@ export function createWebModule(
     m.on("ss_quit", async (_ctx, msg) => {
       const nick = msg.prefix ? extractNick(msg.prefix) : "?";
       const reason = msg.params[0] || "";
-      const entries: Array<[string, StoredMessage]> = [];
+      const entries: Array<[string, Omit<StoredMessage, "sequence">]> = [];
       // Log quit only to channels the user was actually in.
       // This runs BEFORE channelTrackModule, so membership is still intact.
       for (const [, state] of channelStates) {
@@ -2020,7 +2091,7 @@ export function createWebModule(
     m.on("ss_nick", async (_ctx, msg) => {
       const oldNick = msg.prefix ? extractNick(msg.prefix) : "?";
       const newNick = msg.params[0];
-      const entries: Array<[string, StoredMessage]> = [];
+      const entries: Array<[string, Omit<StoredMessage, "sequence">]> = [];
       for (const [, state] of channelStates) {
         if (state.members.has(oldNick)) {
           entries.push([state.name, { time: Date.now(), type: "nick", nick: oldNick, text: newNick }]);
@@ -2089,15 +2160,15 @@ export function createWebModule(
     topic: string,
     selfNick: string,
     webUiSettings: WebUiSettings = DEFAULT_WEB_UI_SETTINGS,
-    channelRevision = 0,
+    channelSequence = 0,
     themeCssHref = ""
   ): string {
-    const messagesHtml = buildChannelMessagesFragment(channel, selfNick, webUiSettings);
+    const messagesHtml = buildChannelMessagesFragment(channel, selfNick, webUiSettings).html;
     const reloadButton = webUiSettings.displayOrder === "desc"
       ? '<button type="button" class="floating" onclick="void refreshMessages();">再読込</button>'
       : "";
     const scriptParts: string[] = [
-      buildMessagesPageScript(channel, webUiSettings, channelRevision),
+      buildMessagesPageScript(channel, webUiSettings, channelSequence),
       buildRichEmbedScript(),
     ];
     if (webUiSettings.displayOrder === "asc") {
@@ -2124,21 +2195,33 @@ export function createWebModule(
   function buildChannelMessagesFragment(
     channel: string,
     selfNick: string,
-    webUiSettings: WebUiSettings = DEFAULT_WEB_UI_SETTINGS
-  ): string {
+    webUiSettings: WebUiSettings = DEFAULT_WEB_UI_SETTINGS,
+    sinceSequence = 0
+  ): RenderedChannelMessagesFragment {
     const buf = getBuffer(channel);
-    const ordered = webUiSettings.displayOrder === "asc" ? [...buf] : [...buf].reverse();
+    const sequenceRange = buf.length === 0
+      ? { latestSequence: 0, oldestSequence: 0, messageCount: 0 }
+      : { latestSequence: buf[buf.length - 1].sequence, oldestSequence: buf[0].sequence, messageCount: buf.length };
+    const canRenderDelta = sinceSequence > 0
+      && sinceSequence <= sequenceRange.latestSequence
+      && sinceSequence >= sequenceRange.oldestSequence - 1;
+    const fragmentMode: FragmentRenderMode = canRenderDelta ? "delta" : "full";
+    const fragmentStartSequence = fragmentMode === "delta" ? sinceSequence : 0;
+    const sourceMessages = fragmentMode === "delta"
+      ? buf.filter((msg) => msg.sequence > sinceSequence)
+      : buf;
+    const ordered = webUiSettings.displayOrder === "asc" ? [...sourceMessages] : [...sourceMessages].reverse();
     const hlKeywords = parseKeywords(webUiSettings.highlightKeywords);
     const dimKeywordList = parseKeywords(webUiSettings.dimKeywords);
     const lines = ordered
-      .map((msg, index) => {
+      .map((msg) => {
         const isDimmed = dimKeywordList.length > 0 &&
           dimKeywordList.some((kw) => msg.text.toLowerCase().includes(kw.toLowerCase()));
-        const divAttrs = isDimmed ? ' class="msg-dimmed"' : "";
-        return `<div${divAttrs}>${renderMessage(msg, selfNick, timezoneOffset, hlKeywords, webUiSettings, `${channel.toLowerCase().replace(/[^a-z0-9]+/gi, "-")}-${index}`)}</div>`;
+        const divClass = isDimmed ? ' class="msg-dimmed"' : "";
+        return `<div data-message-sequence="${msg.sequence}"${divClass}>${renderMessage(msg, selfNick, timezoneOffset, hlKeywords, webUiSettings, `${channel.toLowerCase().replace(/[^a-z0-9]+/gi, "-")}-${msg.sequence}`)}</div>`;
       })
       .join("\n");
-    const popupHtml = webUiSettings.enableInlineUrlPreview
+    const popupHtml = webUiSettings.enableInlineUrlPreview || fragmentMode === "delta"
       ? ""
       : `<div id="url-preview-popup" class="url-preview-popup" hidden>
   <div data-preview-popup-rich class="url-preview-popup__rich" hidden></div>
@@ -2151,7 +2234,12 @@ export function createWebModule(
     </span>
   </div>
  </div>`;
-    return lines + popupHtml;
+    return {
+      html: lines + popupHtml,
+      latestSequence: sequenceRange.latestSequence,
+      startSequence: fragmentStartSequence,
+      mode: fragmentMode,
+    };
   }
 
   function buildChannelComposerPage(
@@ -2217,11 +2305,19 @@ export function createWebModule(
    */
   function hydrateLogs(snapshot?: PersistedWebLogs | null): void {
     store.clear();
+    channelSequences.clear();
     if (!snapshot) return;
 
     for (const [channel, messages] of Object.entries(snapshot)) {
-      const restored = messages.slice(-maxLines).map((msg) => ({ ...msg }));
-      store.set(channel.toLowerCase(), restored);
+      let latestSequence = 0;
+      const restored = messages.slice(-maxLines).map((msg) => {
+        const normalizedMessage = normalizeStoredMessage(msg, latestSequence + 1);
+        latestSequence = Math.max(latestSequence, normalizedMessage.sequence);
+        return normalizedMessage;
+      });
+      const normalizedChannel = channel.toLowerCase();
+      store.set(normalizedChannel, restored);
+      channelSequences.set(normalizedChannel, latestSequence);
     }
   }
 
@@ -2232,6 +2328,11 @@ export function createWebModule(
   function getChannelLogs(channel: string): StoredMessage[] | null {
     const buf = store.get(channel.toLowerCase());
     return buf ? [...buf] : null;
+  }
+
+  function getChannelLatestSequence(channel: string): number {
+    const buf = store.get(channel.toLowerCase());
+    return buf && buf.length > 0 ? buf[buf.length - 1].sequence : 0;
   }
 
   return {
@@ -2245,5 +2346,6 @@ export function createWebModule(
     snapshotLogs,
     hydrateLogs,
     getChannelLogs,
+    getChannelLatestSequence,
   };
 }

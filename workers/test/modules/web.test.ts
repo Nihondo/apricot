@@ -128,8 +128,66 @@ describe("createWebModule", () => {
 
     const fragment = web.buildChannelMessagesFragment("#general", "apricot");
 
-    expect(fragment).toContain("fragment line");
-    expect(fragment).toContain("alice&gt;");
+    expect(fragment.mode).toBe("full");
+    expect(fragment.startSequence).toBe(0);
+    expect(fragment.latestSequence).toBe(1);
+    expect(fragment.html).toContain("fragment line");
+    expect(fragment.html).toContain("alice&gt;");
+  });
+
+  it("builds delta fragments without the shared popup container and keeps per-message templates", async () => {
+    resolveMessageEmbedMock.mockResolvedValue({
+      kind: "rich",
+      sourceUrl: "https://example.com/post",
+      html: "<blockquote data-apricot-rich-embed>embed</blockquote>",
+    });
+    const web = createWebModule(new Map(), 0, undefined, 200, undefined, true);
+    const ctx = makeContext();
+
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "before https://example.com/post"],
+    });
+
+    await web.recordSelfMessage("#general", "apricot", "after https://example.com/post", {
+      kind: "rich",
+      sourceUrl: "https://example.com/post",
+      html: "<blockquote data-apricot-rich-embed>embed</blockquote>",
+    });
+
+    const fragment = web.buildChannelMessagesFragment(
+      "#general",
+      "apricot",
+      buildWebUiSettings(),
+      1
+    );
+
+    expect(fragment.mode).toBe("delta");
+    expect(fragment.startSequence).toBe(1);
+    expect(fragment.latestSequence).toBe(2);
+    expect(fragment.html).toContain("after");
+    expect(fragment.html).toContain("url-preview-template-");
+    expect(fragment.html).toContain("-2");
+    expect(fragment.html).not.toContain('id="url-preview-popup"');
+  });
+
+  it("hydrates legacy persisted logs by backfilling sequences", () => {
+    const snapshot: PersistedWebLogs = {
+      "#general": [
+        { time: 1, type: "privmsg", nick: "alice", text: "msg-1" },
+        { time: 2, type: "privmsg", nick: "bob", text: "msg-2" },
+      ],
+    };
+
+    const web = createWebModule(new Map(), 0);
+    web.hydrateLogs(snapshot);
+
+    expect(web.getChannelLatestSequence("#general")).toBe(2);
+    expect(web.snapshotLogs()["#general"]).toMatchObject([
+      { sequence: 1, text: "msg-1" },
+      { sequence: 2, text: "msg-2" },
+    ]);
   });
 
   it("buildChannelPage desc: composer iframe is placed before messages iframe", async () => {
@@ -204,9 +262,10 @@ describe("createWebModule", () => {
     expect(html).toContain("beforeunload");
     expect(html).toContain("window.refreshMessages = refreshMessages");
     expect(html).toContain("/messages/fragment");
+    expect(html).toContain("?since=");
     expect(html).toContain("/updates");
     expect(html).toContain("var apricotUpdateSocketGeneration = 0");
-    expect(html).toContain("var apricotShouldForceRefreshOnNextChannelUpdate = false");
+    expect(html).toContain("var apricotLatestSequence = 0");
     expect(html).toContain("var apricotHeartbeatIntervalMs = 30000");
     expect(html).toContain("var apricotMissedHeartbeatLimit = 2");
     expect(html).toContain("function markSocketHealthy()");
@@ -217,14 +276,16 @@ describe("createWebModule", () => {
     expect(html).toContain("apricotHasIssuedDegradedRefresh = true;");
     expect(html).toContain('forceReconnectUpdatesSocket("heartbeat-stale")');
     expect(html).toContain("if (!isCurrentSocketGeneration(socketGeneration)) {");
-    expect(html).toContain("function isValidRevision(revision)");
-    expect(html).toContain("if (apricotShouldForceRefreshOnNextChannelUpdate) {");
-    expect(html).toContain("apricotLatestRevision = isValidRevision(revision) ? revision : 0;");
-    expect(html).toContain('"force refresh after reconnect revision=" + String(apricotLatestRevision)');
+    expect(html).toContain("function isValidSequence(sequence)");
+    expect(html).toContain("function readFragmentMetadata(response)");
+    expect(html).toContain("X-Apricot-Channel-Sequence");
+    expect(html).toContain("X-Apricot-Fragment-Mode");
+    expect(html).toContain("function applyMessagesDelta(html)");
+    expect(html).toContain("fragmentMetadata.startSequence === apricotLatestSequence");
+    expect(html).toContain('debugUpdateSocket("channel update sequence=" + String(nextSequence)');
     expect(html).toContain('debugUpdateSocket("degraded refresh started"');
     expect(html).toContain('debugUpdateSocket("force reconnect: " + reason');
     expect(html).toContain('debugUpdateSocket("socket open"');
-    expect(html).toContain("apricotShouldForceRefreshOnNextChannelUpdate = socketGeneration > 1;");
     expect(html).toContain("function startFallbackRefreshPoll()");
     expect(html).toContain("Heartbeat 導入により現状は未使用。将来の運用切替用に保持している。");
     expect(html).not.toContain("startFallbackRefreshPoll();");
@@ -686,14 +747,14 @@ describe("createWebModule", () => {
       buildWebUiSettings({ dimKeywords: "NickServ" })
     );
 
-    expect(html).toContain('<div class="msg-dimmed">');
+    expect(html).toContain('class="msg-dimmed"');
     // Normal message should not be dimmed
     const normalDivIdx = html.lastIndexOf("hello everyone");
-    const dimmedDivIdx = html.indexOf('<div class="msg-dimmed">');
+    const dimmedDivIdx = html.indexOf('class="msg-dimmed"');
     expect(normalDivIdx).toBeGreaterThan(-1);
     expect(dimmedDivIdx).toBeGreaterThan(-1);
     // Only one line should be dimmed
-    expect(html.split('<div class="msg-dimmed">').length - 1).toBe(1);
+    expect(html.split('class="msg-dimmed"').length - 1).toBe(1);
   });
 
   it("no msg-dimmed class when dim keywords list is empty", async () => {

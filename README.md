@@ -18,7 +18,7 @@ Cloudflare Workers + Durable Objects で動作します。
 
 ---
 
-## クイックスタート（初回セットアップ）
+### クイックスタート（初回セットアップ）
 
 [getting-started.md](getting-started.md) に基本的なセットアップと利用方法をまとめています。
 
@@ -102,9 +102,7 @@ curl http://localhost:8787/proxy/myproxy/api/status \
 }
 ```
 
----
-
-## 複数ユーザで使うには
+### 複数ユーザで使うには
 
 1 つの Workers デプロイを複数人で共有できます。
 
@@ -126,9 +124,7 @@ Bob   → https://.../proxy/bob/web/     ← "bob" がプロキシ ID
 
 **注意**: `CLIENT_PASSWORD` はデプロイ全体で 1 つだけ設定できます。プロキシ ID ごとにパスワードを分けることはできないため、全ユーザーが同じパスワードを共有します。また、IRC サーバーの接続設定（`IRC_HOST` 等）も全プロキシ ID で共通です。
 
----
-
-## 利用シーン別ガイド
+### 利用シーン別ガイド
 
 ### ブラウザ（Web UI）から利用する
 
@@ -259,19 +255,11 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/post \
 ```
 
 - **Twitter/X URL**: oEmbed API で投稿本文と著者名を取得し、Web UI では画像がなくてもテキストカードとしてプレビュー
-- **一般 URL**: Cloudflare Browser Rendering のシークレットが設定されていればレンダリング後の `<title>` を優先取得。未設定または失敗時は HTML の `<title>` タグを取得（最初の 32KB のみ読み込み）
-- フォールバック: URL をそのまま投稿
+- **一般 URL**: Cloudflare Browser Rendering のシークレットが設定されていればレンダリング後の `<title>` を優先取得。未設定または取得失敗時は HTML の `<title>` タグを取得
+- **フォールバック**: メタデータを取れない場合は URL をそのまま投稿
 
 受信メッセージに含まれる URL の自動プレビュー解決は、既定では無効です。必要な場合だけ `ENABLE_REMOTE_URL_PREVIEW=true` を設定してください。
 この制限は外部 fetch の濫用を抑えるためで、`POST /api/post` の `url` 指定による投稿は従来どおりメタデータ取得を行います。
-
-Web UI の URL プレビュー優先順位:
-
-1. 画像直リンクならそのままインライン画像として扱う
-2. YouTube URL ならサムネイル画像を生成する
-3. Twitter/X URL は oEmbed からテキストカードを生成する
-4. それ以外は `og:image` → `twitter:image` → JSON oEmbed の順で画像を探す
-5. 画像もテキストカードも生成できなければプレビューは表示しない
 
 リクエストボディ:
 
@@ -341,19 +329,19 @@ curl http://localhost:8787/proxy/myproxy/api/logs/%23general \
 
 | フィールド | 型 | 説明 |
 |------------|-----|------|
+| `sequence` | number | チャンネル内で単調増加するログシーケンス |
 | `time` | number | Unix ミリ秒 |
 | `type` | string | `privmsg` / `notice` / `join` / `part` / `quit` / `kick` / `nick` / `topic` / `mode` / `self` |
 | `nick` | string | 発言者 nick |
 | `text` | string | メッセージ本文（`nick` / `topic` 等では対象または新しい値） |
 | `embed` | object? | Web UI 用の URL プレビュー情報。`kind`, `sourceUrl`, `imageUrl?`, `title?`, `siteName?`, `description?` を含む |
 
-最大 200 件（時系列順）を返します。指定チャンネルのバッファが存在しない場合は `404` を返します。
+最大 `WEB_LOG_MAX_LINES` 件（既定 200 件、時系列順）を返します。指定チャンネルのバッファが存在しない場合は `404` を返します。
+この API は最新バッファの取得用であり、長期保存用の完全なアーカイブ API ではありません。流量が高いチャンネルでは、ポーリング間隔より先に古いログが押し出される場合があります。
 
 Web UI 設定画面では、URL プレビューを本文下に常時表示するかを切り替えられます。OFF の場合でも、対応する URL リンクでは PC の hover / focus とタッチ端末の長押し相当でプレビューできます。
 
----
-
-## Cloudflare へのデプロイ
+### Cloudflare へのデプロイ
 
 ### 1. Wrangler にログインする
 
@@ -385,7 +373,9 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 
 ---
 
-## 技術リファレンス
+## 技術情報
+
+この章は運用・拡張・デバッグのための技術資料です。利用手順ではなく、内部仕様と設計の把握を目的にしています。
 
 ### 環境変数一覧
 
@@ -441,7 +431,7 @@ nick の決定順序（高い方が優先）:
 | `GET` | `/proxy/:id/web/theme.css` | Cookie | チャンネル画面専用のカスタム CSS |
 | `GET` | `/proxy/:id/web/:channel` | Cookie | チャンネルシェルページ |
 | `GET` | `/proxy/:id/web/:channel/messages` | Cookie | メッセージ一覧フレーム |
-| `GET` | `/proxy/:id/web/:channel/messages/fragment` | Cookie | メッセージ一覧の HTML 断片（Web UI 内部更新用） |
+| `GET` | `/proxy/:id/web/:channel/messages/fragment` | Cookie | メッセージ一覧の HTML 断片（Web UI 内部更新用。通常は `since` 付きで利用） |
 | `GET` | `/proxy/:id/web/:channel/updates` | Cookie | メッセージ更新通知用 WebSocket（Web UI 内部用） |
 | `GET` | `/proxy/:id/web/:channel/composer` | Cookie | 入力フォームフレーム |
 | `POST` | `/proxy/:id/web/:channel/composer` | Cookie | Web フォームからメッセージ送信 |
@@ -479,10 +469,20 @@ nick の決定順序（高い方が優先）:
 チャンネル画面のメッセージ領域は、以下の Web UI 内部ルートを使って更新されます。
 これらはブラウザ表示用の内部エンドポイントで、外部連携向け API ではありません。
 
-- `GET /proxy/:id/web/:channel/messages/fragment` — メッセージ一覧部分だけを返す HTML 断片
-- `GET /proxy/:id/web/:channel/updates` — メッセージ更新通知を受ける WebSocket
+- `GET /proxy/:id/web/:channel/messages/fragment?since=<sequence>` — メッセージ一覧の HTML 断片。`since=0` または継続不能時は全量、それ以外は差分
+- `GET /proxy/:id/web/:channel/updates` — メッセージ更新通知を受ける WebSocket。`channel-updated` では最新 `sequence` を通知
 
-通常は `updates` の通知を受けた時だけ `messages/fragment` を Fetch し、通知用 WebSocket が切断中のときだけ 30 秒間隔で再同期します。
+通常は `updates` の通知を受けた時だけ `messages/fragment?since=<latestSequence>` を Fetch します。クライアント側で sequence の不整合を検知した場合や、サーバ側で差分継続不能と判断した場合は全量断片へフォールバックします。
+
+### URL プレビュー解決の優先順位
+
+Web UI の URL プレビューは、概ね次の順で解決します。
+
+1. 画像直リンクならそのままインライン画像として扱う
+2. YouTube URL ならサムネイル画像を生成する
+3. Twitter/X URL は oEmbed からテキストカードまたは rich embed を生成する
+4. それ以外は `og:image` → `twitter:image` → JSON oEmbed の順で画像を探す
+5. 画像もテキストカードも生成できなければプレビューは表示しない
 
 ---
 

@@ -362,7 +362,7 @@ describe("IrcProxyDO web log persistence", () => {
     expect(html).toContain("restored line");
   });
 
-  it("renders the web messages fragment route with a revision header", async () => {
+  it("renders the web messages fragment route with sequence headers", async () => {
     const state = new FakeState();
     const proxy = new IrcProxyDO(
       state as unknown as DurableObjectState,
@@ -382,7 +382,9 @@ describe("IrcProxyDO web log persistence", () => {
     }));
 
     expect(response.status).toBe(200);
-    expect(response.headers.get("X-Apricot-Channel-Revision")).toBe("1");
+    expect(response.headers.get("X-Apricot-Channel-Sequence")).toBe("1");
+    expect(response.headers.get("X-Apricot-Fragment-Start-Sequence")).toBe("0");
+    expect(response.headers.get("X-Apricot-Fragment-Mode")).toBe("full");
     expect(await response.text()).toContain("fragment body");
   });
 
@@ -1090,7 +1092,7 @@ describe("IrcProxyDO web log persistence", () => {
 
     expect(generalSubscriber.send).toHaveBeenNthCalledWith(
       1,
-      JSON.stringify({ type: "channel-updated", channel: "#general", revision: 1 })
+      JSON.stringify({ type: "channel-updated", channel: "#general", sequence: 1 })
     );
     expect(randomSubscriber.send).not.toHaveBeenCalled();
 
@@ -1106,7 +1108,7 @@ describe("IrcProxyDO web log persistence", () => {
 
     expect(generalSubscriber.send).toHaveBeenNthCalledWith(
       2,
-      JSON.stringify({ type: "channel-updated", channel: "#general", revision: 2 })
+      JSON.stringify({ type: "channel-updated", channel: "#general", sequence: 2 })
     );
     expect(randomSubscriber.send).not.toHaveBeenCalled();
   });

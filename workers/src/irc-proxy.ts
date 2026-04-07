@@ -61,7 +61,7 @@ const nickErrorCodes = new Set(["431", "432", "433", "436", "437", "438", "447",
 type WebChannelUpdateMessage = {
   type: "channel-updated";
   channel: string;
-  revision: number;
+  sequence: number;
 };
 type WebHeartbeatPingMessage = {
   type: "ping";
@@ -109,7 +109,6 @@ export class IrcProxyDO implements DurableObject {
   /** Per-WebSocket pending password during registration */
   private pendingPasswords = new Map<WebSocket, string>();
   private webUpdateSubscribers = new Map<WebSocket, string>();
-  private channelRevisions = new Map<string, number>();
 
   /** Web module instance (holds per-DO message buffers) */
   private readonly web: ReturnType<typeof createWebModule>;
@@ -466,7 +465,8 @@ export class IrcProxyDO implements DurableObject {
         return new Response("Method Not Allowed", { status: 405 });
       }
       return this.renderWebChannelMessagesFragment(
-        decodeURIComponent(webMessagesFragmentMatch[1])
+        decodeURIComponent(webMessagesFragmentMatch[1]),
+        Number(url.searchParams.get("since") || "0")
       );
     }
 
@@ -1046,29 +1046,32 @@ export class IrcProxyDO implements DurableObject {
   }
 
   private renderWebChannelMessagesPage(channel: string, webBase: string): Response {
-    const revision = this.getChannelRevision(channel);
+    const channelSequence = this.web.getChannelLatestSequence(channel);
     const html = this.web.buildChannelMessagesPage(
       channel,
       this.getChannelTopic(channel),
       this.nick,
       this.webUiSettings,
-      revision,
+      channelSequence,
       `${webBase}/theme.css`
     );
     return new Response(html, {
-      headers: this.buildWebMessagesHeaders(revision),
+      headers: this.buildWebMessagesHeaders(channelSequence),
     });
   }
 
-  private renderWebChannelMessagesFragment(channel: string): Response {
-    const revision = this.getChannelRevision(channel);
-    const html = this.web.buildChannelMessagesFragment(
+  private renderWebChannelMessagesFragment(channel: string, sinceSequence: number): Response {
+    const fragment = this.web.buildChannelMessagesFragment(
       channel,
       this.nick,
-      this.webUiSettings
+      this.webUiSettings,
+      Number.isFinite(sinceSequence) ? Math.trunc(sinceSequence) : 0
     );
-    return new Response(html, {
-      headers: this.buildWebMessagesHeaders(revision),
+    return new Response(fragment.html, {
+      headers: this.buildWebMessagesHeaders(fragment.latestSequence, {
+        startSequence: fragment.startSequence,
+        mode: fragment.mode,
+      }),
     });
   }
 
@@ -1681,38 +1684,37 @@ export class IrcProxyDO implements DurableObject {
     });
   }
 
-  private buildWebMessagesHeaders(revision: number): HeadersInit {
-    return {
+  private buildWebMessagesHeaders(
+    channelSequence: number,
+    fragment?: { startSequence: number; mode: "full" | "delta" }
+  ): HeadersInit {
+    const headers: HeadersInit = {
       "Content-Type": "text/html; charset=utf-8",
-      "X-Apricot-Channel-Revision": String(revision),
+      "X-Apricot-Channel-Sequence": String(channelSequence),
       "Cache-Control": "no-store",
     };
-  }
-
-  private getChannelRevision(channel: string): number {
-    return this.channelRevisions.get(channel.toLowerCase()) ?? 0;
+    if (fragment) {
+      return {
+        ...headers,
+        "X-Apricot-Fragment-Start-Sequence": String(fragment.startSequence),
+        "X-Apricot-Fragment-Mode": fragment.mode,
+      };
+    }
+    return headers;
   }
 
   private handleChannelLogsChanged(channels: string[]): void {
     for (const channel of channels) {
-      const revision = this.bumpChannelRevision(channel);
-      this.broadcastWebChannelUpdate(channel, revision);
+      this.broadcastWebChannelUpdate(channel, this.web.getChannelLatestSequence(channel));
     }
   }
 
-  private bumpChannelRevision(channel: string): number {
-    const normalizedChannel = channel.toLowerCase();
-    const nextRevision = (this.channelRevisions.get(normalizedChannel) ?? 0) + 1;
-    this.channelRevisions.set(normalizedChannel, nextRevision);
-    return nextRevision;
-  }
-
-  private broadcastWebChannelUpdate(channel: string, revision: number): void {
+  private broadcastWebChannelUpdate(channel: string, channelSequence: number): void {
     const normalizedChannel = channel.toLowerCase();
     const payload: WebChannelUpdateMessage = {
       type: "channel-updated",
       channel,
-      revision,
+      sequence: channelSequence,
     };
     const serializedPayload = JSON.stringify(payload);
     for (const [ws, subscribedChannel] of this.webUpdateSubscribers) {
@@ -1735,7 +1737,7 @@ export class IrcProxyDO implements DurableObject {
     const payload: WebChannelUpdateMessage = {
       type: "channel-updated",
       channel,
-      revision: this.getChannelRevision(channel),
+      sequence: this.web.getChannelLatestSequence(channel),
     };
     server.send(JSON.stringify(payload));
     return new Response(null, { status: 101, webSocket: client });
