@@ -1,3 +1,4 @@
+import Encoding from "encoding-japanese";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   extractUrlMetadata,
@@ -5,6 +6,18 @@ import {
   resolveMessageEmbed,
   resolveUrlEmbed,
 } from "../../src/modules/url-metadata";
+
+function encodeShiftJisHtml(html: string): Uint8Array {
+  return new Uint8Array(
+    Encoding.convert(Encoding.stringToCode(html), { to: "SJIS", from: "UNICODE", type: "array" }),
+  );
+}
+
+function createHtmlResponse(html: string, contentType: string): Response {
+  return new Response(encodeShiftJisHtml(html), {
+    headers: { "Content-Type": contentType },
+  });
+}
 
 describe("url metadata resolver", () => {
   const originalFetch = globalThis.fetch;
@@ -311,6 +324,53 @@ describe("url metadata resolver", () => {
       siteName: "OG Site",
       description: undefined,
     });
+  });
+
+  it("decodes Shift_JIS HTML from the Content-Type header before building cards", async () => {
+    fetchMock.mockResolvedValue(createHtmlResponse(
+      "<html><head><meta property=\"og:image\" content=\"/images/oricon.jpg\"><meta property=\"og:title\" content=\"粗品、入学式にサプライズで登場\"><meta property=\"og:description\" content=\"会場どよめき 2300人に魂のメッセージ\"><meta property=\"og:site_name\" content=\"ORICON NEWS\"></head></html>",
+      "text/html; charset=Shift_JIS",
+    ));
+
+    const embed = await resolveUrlEmbed("https://example.com/oricon");
+
+    expect(embed).toEqual({
+      kind: "card",
+      sourceUrl: "https://example.com/oricon",
+      imageUrl: "https://example.com/images/oricon.jpg",
+      title: "粗品、入学式にサプライズで登場",
+      siteName: "ORICON NEWS",
+      description: "会場どよめき 2300人に魂のメッセージ",
+    });
+  });
+
+  it("decodes Shift_JIS HTML from a meta charset declaration when the header omits charset", async () => {
+    fetchMock.mockResolvedValue(createHtmlResponse(
+      "<html><head><meta charset=\"Shift_JIS\"><meta property=\"og:image\" content=\"/images/meta-only.jpg\"><meta property=\"og:title\" content=\"メタ指定だけでも読める\"></head></html>",
+      "text/html",
+    ));
+
+    const embed = await resolveUrlEmbed("https://example.com/meta-only");
+
+    expect(embed).toEqual({
+      kind: "card",
+      sourceUrl: "https://example.com/meta-only",
+      imageUrl: "https://example.com/images/meta-only.jpg",
+      title: "メタ指定だけでも読める",
+      siteName: undefined,
+      description: undefined,
+    });
+  });
+
+  it("detects Shift_JIS HTML when neither header nor meta declares a charset", async () => {
+    fetchMock.mockResolvedValue(createHtmlResponse(
+      "<html><head><title>文字コード自動判定で取得</title></head></html>",
+      "text/html",
+    ));
+
+    const metadata = await extractUrlMetadata("https://example.com/detect-only");
+
+    expect(metadata).toBe("文字コード自動判定で取得 https://example.com/detect-only");
   });
 
   it("uses twitter:image when og:image is missing", async () => {

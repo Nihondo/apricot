@@ -2,6 +2,7 @@
  * URL プレビューの取得処理と provider 別解決ロジック。
  */
 
+import Encoding from "encoding-japanese";
 import {
   FETCH_TIMEOUT_MS,
   IMAGE_EXTENSIONS,
@@ -20,6 +21,8 @@ import type {
   XEmbedTheme,
   YouTubeEmbedInfo,
 } from "./url-preview-types";
+
+type HtmlEncodingTarget = "utf-8" | "SJIS" | "EUCJP" | "JIS";
 
 /**
  * X の URL から投稿メタデータを抽出する。
@@ -327,8 +330,8 @@ async function fetchHtmlMetadata(url: string): Promise<HtmlMetadata | undefined>
     return undefined;
   }
 
-  let html = "";
-  const decoder = new TextDecoder();
+  let asciiHtml = "";
+  const chunks: Uint8Array[] = [];
 
   try {
     let totalRead = 0;
@@ -337,9 +340,10 @@ async function fetchHtmlMetadata(url: string): Promise<HtmlMetadata | undefined>
       if (done) {
         break;
       }
-      html += decoder.decode(value, { stream: true });
+      chunks.push(value);
       totalRead += value.byteLength;
-      if (totalRead >= MAX_HTML_BYTES || /<\/head>/i.test(html)) {
+      asciiHtml += decodeAsciiChunk(value);
+      if (totalRead >= MAX_HTML_BYTES || /<\/head>/i.test(asciiHtml)) {
         break;
       }
     }
@@ -347,7 +351,118 @@ async function fetchHtmlMetadata(url: string): Promise<HtmlMetadata | undefined>
     await reader.cancel();
   }
 
+  const htmlBytes = concatBytes(chunks);
+  const charset = resolveHtmlCharset(contentType, asciiHtml, htmlBytes);
+  const html = decodeHtmlBytes(htmlBytes, charset);
   return { html, finalUrl };
+}
+
+function decodeAsciiChunk(value: Uint8Array): string {
+  let ascii = "";
+  for (const byte of value) {
+    ascii += byte <= 0x7f ? String.fromCharCode(byte) : " ";
+  }
+  return ascii;
+}
+
+function concatBytes(chunks: Uint8Array[]): Uint8Array {
+  const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
+  const merged = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return merged;
+}
+
+function resolveHtmlCharset(
+  contentType: string,
+  asciiHtml: string,
+  htmlBytes: Uint8Array,
+): HtmlEncodingTarget {
+  const headerCharset = normalizeHtmlCharset(extractCharsetFromContentType(contentType));
+  if (headerCharset) {
+    return headerCharset;
+  }
+
+  const metaCharset = normalizeHtmlCharset(extractCharsetFromHtml(asciiHtml));
+  if (metaCharset) {
+    return metaCharset;
+  }
+
+  const detectedCharset = Encoding.detect(htmlBytes, ["UTF8", "SJIS", "EUCJP", "JIS"]);
+  return detectedCharset ? normalizeDetectedHtmlCharset(detectedCharset) : "utf-8";
+}
+
+function extractCharsetFromContentType(contentType: string): string | undefined {
+  const match = contentType.match(/charset\s*=\s*("?)([^";,\s]+)\1/i);
+  return match?.[2];
+}
+
+function extractCharsetFromHtml(asciiHtml: string): string | undefined {
+  const metaCharsetMatch = asciiHtml.match(/<meta\b[^>]*charset\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"'/>]+))/i);
+  if (metaCharsetMatch) {
+    return metaCharsetMatch[1] || metaCharsetMatch[2] || metaCharsetMatch[3];
+  }
+
+  const httpEquivMatch = asciiHtml.match(
+    /<meta\b[^>]*http-equiv\s*=\s*(?:"content-type"|'content-type'|content-type)[^>]*content\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"'/>]+))/i,
+  );
+  if (!httpEquivMatch) {
+    return undefined;
+  }
+
+  return extractCharsetFromContentType(httpEquivMatch[1] || httpEquivMatch[2] || httpEquivMatch[3] || "");
+}
+
+function normalizeHtmlCharset(charset?: string): HtmlEncodingTarget | undefined {
+  if (!charset) {
+    return undefined;
+  }
+
+  const normalizedCharset = charset.trim().toLowerCase();
+  if (normalizedCharset === "utf-8" || normalizedCharset === "utf8") {
+    return "utf-8";
+  }
+  if (
+    normalizedCharset === "shift_jis"
+    || normalizedCharset === "shift-jis"
+    || normalizedCharset === "sjis"
+    || normalizedCharset === "ms_kanji"
+    || normalizedCharset === "cp932"
+    || normalizedCharset === "windows-31j"
+  ) {
+    return "SJIS";
+  }
+  if (normalizedCharset === "euc-jp" || normalizedCharset === "eucjp") {
+    return "EUCJP";
+  }
+  if (normalizedCharset === "iso-2022-jp") {
+    return "JIS";
+  }
+  return undefined;
+}
+
+function normalizeDetectedHtmlCharset(charset: string): HtmlEncodingTarget {
+  switch (charset) {
+    case "SJIS":
+    case "EUCJP":
+    case "JIS":
+      return charset;
+    default:
+      return "utf-8";
+  }
+}
+
+function decodeHtmlBytes(bytes: Uint8Array, charset: HtmlEncodingTarget): string {
+  if (charset === "utf-8") {
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+
+  return Encoding.codeToString(
+    Encoding.convert(Array.from(bytes), { to: "UNICODE", from: charset }),
+  );
 }
 
 function extractPreviewImageUrl(html: string, baseUrl: string): string | undefined {

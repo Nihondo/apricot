@@ -67,7 +67,7 @@ export const WEB_UI_COLOR_FIELDS = [
   { name: "buttonColor", label: "ボタン" },
   { name: "buttonTextColor", label: "ボタン文字" },
   { name: "selfColor", label: "自ユーザ名" },
-  { name: "mutedTextColor", label: "控えめ表示行" },
+  { name: "mutedTextColor", label: "非強調色" },
   { name: "keywordColor", label: "キーワード" },
 ] as const satisfies ReadonlyArray<{ name: keyof WebUiColorSettings; label: string }>;
 
