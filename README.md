@@ -533,8 +533,17 @@ IRC クライアント (WebSocket)  ──→  Cloudflare Worker (index.ts)
 | `src/modules/ping.ts` | PING/PONG 自動応答 |
 | `src/modules/channel-track.ts` | JOIN/PART/KICK/QUIT/NICK によるチャンネル状態追跡 |
 | `src/modules/client-sync.ts` | 新規クライアント接続時の状態リプレイ |
-| `src/modules/web.ts` | Web チャットインターフェース・メッセージバッファ・DO ストレージ永続化 |
-| `src/modules/url-metadata.ts` | URL メタデータ抽出と Web UI プレビュー解決（画像直リンク・YouTube iframe embed・X/Twitter oEmbed・OGP / Twitter Card / oEmbed） |
+| `src/modules/web.ts` | Web UI モジュールの公開エントリポイント |
+| `src/modules/web-module.ts` | IRC イベントと Web ストア / 描画を結びつける module factory |
+| `src/modules/web-render.ts` | Web UI の HTML / フラグメント描画 |
+| `src/modules/web-store.ts` | Web メッセージバッファと Durable Object ストレージ永続化 |
+| `src/modules/web-theme.ts` | Web UI のテーマ設定・既定値・ X 埋め込みテーマ解決 |
+| `src/modules/web-types.ts` | Web UI モジュールで共有する型定義 |
+| `src/modules/url-metadata.ts` | URL メタデータ / プレビュー機能の公開エントリポイント |
+| `src/modules/url-preview-resolver.ts` | URL 抽出・タイトル取得・埋め込み解決の公開 API |
+| `src/modules/url-preview-providers.ts` | 画像直リンク・YouTube・X/Twitter・一般 HTML の provider 別解決と HTML メタデータ抽出 |
+| `src/modules/url-preview-policy.ts` | URL プレビュー取得前の安全性判定と各種制限値 |
+| `src/modules/url-preview-types.ts` | URL プレビュー解決で共有する型定義 |
 
 ### IRC 接続状態遷移
 
