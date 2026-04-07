@@ -229,13 +229,11 @@ describe("url metadata resolver", () => {
     });
   });
 
-  it("resolves YouTube previews and falls back to hq thumbnails when maxres is unavailable", async () => {
+  it("resolves YouTube watch URLs as rich embeds with oEmbed metadata", async () => {
     fetchMock.mockImplementation(async (input, init) => {
       const url = String(input);
-      if (url.includes("maxresdefault.jpg") && init?.method === "HEAD") {
-        return new Response(null, { status: 404 });
-      }
       if (url.startsWith("https://www.youtube.com/oembed")) {
+        expect(init?.method).toBeUndefined();
         return Response.json({
           title: "Sample Video",
           provider_name: "YouTube",
@@ -247,11 +245,53 @@ describe("url metadata resolver", () => {
     const embed = await resolveUrlEmbed("https://www.youtube.com/watch?v=abc123xyz00");
 
     expect(embed).toEqual({
-      kind: "card",
+      kind: "rich",
       sourceUrl: "https://www.youtube.com/watch?v=abc123xyz00",
-      imageUrl: "https://img.youtube.com/vi/abc123xyz00/hqdefault.jpg",
       title: "Sample Video",
       siteName: "YouTube",
+      html: "<iframe width=\"355\" height=\"200\" src=\"https://www.youtube.com/embed/abc123xyz00\" title=\"YouTube video player\" frameborder=\"0\" allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share\" referrerpolicy=\"strict-origin-when-cross-origin\" allowfullscreen></iframe>",
+    });
+  });
+
+  it("resolves YouTube shorts URLs as rich embeds with tall iframes", async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.startsWith("https://www.youtube.com/oembed")) {
+        return Response.json({
+          title: "Sample Short",
+          provider_name: "YouTube",
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const embed = await resolveUrlEmbed("https://www.youtube.com/shorts/MzL20PlmzpA");
+
+    expect(embed).toEqual({
+      kind: "rich",
+      sourceUrl: "https://www.youtube.com/shorts/MzL20PlmzpA",
+      title: "Sample Short",
+      siteName: "YouTube",
+      html: "<iframe width=\"355\" height=\"631\" src=\"https://www.youtube.com/embed/MzL20PlmzpA\" title=\"YouTube video player\" frameborder=\"0\" allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share\" referrerpolicy=\"strict-origin-when-cross-origin\" allowfullscreen></iframe>",
+    });
+  });
+
+  it("falls back to title-less rich embeds when YouTube oEmbed fails", async () => {
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.startsWith("https://www.youtube.com/oembed")) {
+        throw new Error("oEmbed unavailable");
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+
+    const embed = await resolveUrlEmbed("https://www.youtube.com/watch?v=abc123xyz00");
+
+    expect(embed).toEqual({
+      kind: "rich",
+      sourceUrl: "https://www.youtube.com/watch?v=abc123xyz00",
+      siteName: "YouTube",
+      html: "<iframe width=\"355\" height=\"200\" src=\"https://www.youtube.com/embed/abc123xyz00\" title=\"YouTube video player\" frameborder=\"0\" allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share\" referrerpolicy=\"strict-origin-when-cross-origin\" allowfullscreen></iframe>",
     });
   });
 

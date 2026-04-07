@@ -13,8 +13,8 @@ Cloudflare Workers + Durable Objects で動作します。
 - ブラウザでのチャットインターフェース（テーマカスタマイズ・キーワードハイライト対応）
 - WebSocket 対応 IRC クライアントからの接続
 - REST API 経由での操作（チャンネル参加・メッセージ投稿・nick 変更）
-- URL 投稿時のページタイトル自動取得（Twitter/X oEmbed 対応）
-- Web UI の URL 画像 / カードプレビュー（常時表示または hover / 長押し）
+- URL 投稿時のページタイトル自動取得（Twitter/X・YouTube oEmbed 対応）
+- Web UI の URL 画像 / カード / 埋め込みプレビュー（常時表示または hover / 長押し）
 
 ---
 
@@ -159,7 +159,7 @@ http://localhost:8787/proxy/myproxy/web/
 - **フォント・文字サイズ** — チャンネル画面のフォントファミリーとサイズ
 - **配色テーマ** — 13 色のカラーピッカーによるテーマ設定。ライト／ダークのプリセットあり
 - **表示順** — 古い順（asc）/ 新しい順（desc）の切り替え
-- **URL プレビュー** — URL の画像 / カードプレビューを常時表示するか（OFF の場合は hover / 長押しで表示）
+- **URL プレビュー** — URL の画像 / カード / 埋め込みプレビューを常時表示するか（OFF の場合は hover / 長押しで表示）
 - **強調したいキーワード** — 指定語をハイライト表示
 - **控えめ表示キーワード** — 指定語を含むメッセージを薄く表示
 - **追加 CSS** — チャンネル画面専用の限定 CSS
@@ -254,7 +254,8 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/post \
   -d '{"channel": "#general", "url": "https://example.com/article"}'
 ```
 
-- **Twitter/X URL**: oEmbed API で投稿本文と著者名を取得し、Web UI では画像がなくてもテキストカードとしてプレビュー
+- **YouTube URL**: Web UI では iframe 埋め込みプレビューを保存。通常動画は高さ `200`、Shorts は高さ `631` で表示
+- **Twitter/X URL**: oEmbed API で投稿本文と著者名を取得し、Web UI ではテキストカードまたは rich embed としてプレビュー
 - **一般 URL**: Cloudflare Browser Rendering のシークレットが設定されていればレンダリング後の `<title>` を優先取得。未設定または取得失敗時は HTML の `<title>` タグを取得
 - **フォールバック**: メタデータを取れない場合は URL をそのまま投稿
 
@@ -334,7 +335,7 @@ curl http://localhost:8787/proxy/myproxy/api/logs/%23general \
 | `type` | string | `privmsg` / `notice` / `join` / `part` / `quit` / `kick` / `nick` / `topic` / `mode` / `self` |
 | `nick` | string | 発言者 nick |
 | `text` | string | メッセージ本文（`nick` / `topic` 等では対象または新しい値） |
-| `embed` | object? | Web UI 用の URL プレビュー情報。`kind`, `sourceUrl`, `imageUrl?`, `title?`, `siteName?`, `description?` を含む |
+| `embed` | object? | Web UI 用の URL プレビュー情報。`kind`, `sourceUrl`, `imageUrl?`, `title?`, `siteName?`, `description?`, `html?` を含む |
 
 最大 `WEB_LOG_MAX_LINES` 件（既定 200 件、時系列順）を返します。指定チャンネルのバッファが存在しない場合は `404` を返します。
 この API は最新バッファの取得用であり、長期保存用の完全なアーカイブ API ではありません。流量が高いチャンネルでは、ポーリング間隔より先に古いログが押し出される場合があります。
@@ -479,7 +480,7 @@ nick の決定順序（高い方が優先）:
 Web UI の URL プレビューは、概ね次の順で解決します。
 
 1. 画像直リンクならそのままインライン画像として扱う
-2. YouTube URL ならサムネイル画像を生成する
+2. YouTube URL なら動画 ID を抽出し、iframe の rich embed を生成する
 3. Twitter/X URL は oEmbed からテキストカードまたは rich embed を生成する
 4. それ以外は `og:image` → `twitter:image` → JSON oEmbed の順で画像を探す
 5. 画像もテキストカードも生成できなければプレビューは表示しない
@@ -524,7 +525,7 @@ IRC クライアント (WebSocket)  ──→  Cloudflare Worker (index.ts)
 | `src/modules/channel-track.ts` | JOIN/PART/KICK/QUIT/NICK によるチャンネル状態追跡 |
 | `src/modules/client-sync.ts` | 新規クライアント接続時の状態リプレイ |
 | `src/modules/web.ts` | Web チャットインターフェース・メッセージバッファ・DO ストレージ永続化 |
-| `src/modules/url-metadata.ts` | URL メタデータ抽出と Web UI プレビュー解決（画像直リンク・YouTube・OGP / Twitter Card / oEmbed） |
+| `src/modules/url-metadata.ts` | URL メタデータ抽出と Web UI プレビュー解決（画像直リンク・YouTube iframe embed・X/Twitter oEmbed・OGP / Twitter Card / oEmbed） |
 
 ### IRC 接続状態遷移
 

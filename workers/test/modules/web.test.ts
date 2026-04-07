@@ -630,6 +630,36 @@ describe("createWebModule", () => {
     expect(html).toContain("window.apricotRefreshRichEmbeds");
   });
 
+  it("renders rich YouTube URL embeds inline through the shared rich embed path", async () => {
+    resolveMessageEmbedMock.mockResolvedValue({
+      kind: "rich",
+      sourceUrl: "https://www.youtube.com/watch?v=abc123xyz00",
+      siteName: "YouTube",
+      title: "Sample Video",
+      html: "<iframe width=\"355\" height=\"200\" src=\"https://www.youtube.com/embed/abc123xyz00\" title=\"YouTube video player\" frameborder=\"0\" allow=\"accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share\" referrerpolicy=\"strict-origin-when-cross-origin\" allowfullscreen></iframe>",
+    });
+    const web = createWebModule(new Map(), 0, undefined, 200, undefined, true);
+    const ctx = makeContext();
+
+    await web.module.handlers.get("ss_privmsg")?.(ctx, {
+      prefix: "alice!user@host",
+      command: "PRIVMSG",
+      params: ["#general", "look https://www.youtube.com/watch?v=abc123xyz00"],
+    });
+
+    const html = web.buildChannelMessagesPage(
+      "#general",
+      "",
+      "apricot",
+      buildWebUiSettings({ enableInlineUrlPreview: true })
+    );
+
+    expect(html).toContain("url-embed--rich");
+    expect(html).toContain("data-apricot-rich-embed");
+    expect(html).toContain("https://www.youtube.com/embed/abc123xyz00");
+    expect(html).toContain('height="200"');
+  });
+
   it("renders popup templates for rich X URL embeds when inline preview is disabled", async () => {
     resolveMessageEmbedMock.mockResolvedValue({
       kind: "rich",

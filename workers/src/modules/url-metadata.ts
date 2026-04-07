@@ -41,6 +41,11 @@ interface HtmlMetadata {
   finalUrl: string;
 }
 
+interface YouTubeEmbedInfo {
+  videoId: string;
+  isShort: boolean;
+}
+
 /**
  * Cloudflare Browser Rendering credentials for rendered title extraction.
  */
@@ -342,15 +347,12 @@ async function resolveXEmbed(url: string, theme: XEmbedTheme): Promise<ResolvedU
 }
 
 async function resolveYouTubeEmbed(url: string): Promise<ResolvedUrlEmbed | undefined> {
-  const videoId = extractYouTubeVideoId(url);
-  if (!videoId) {
+  const embedInfo = extractYouTubeEmbedInfo(url);
+  if (!embedInfo) {
     return undefined;
   }
 
-  const maxResUrl = `https://img.youtube.com/vi/${videoId}/maxresdefault.jpg`;
-  const imageUrl = await canFetchImage(maxResUrl)
-    ? maxResUrl
-    : `https://img.youtube.com/vi/${videoId}/hqdefault.jpg`;
+  const html = buildYouTubeEmbedHtml(embedInfo);
   const oembedUrl = `https://www.youtube.com/oembed?url=${encodeURIComponent(url)}&format=json`;
 
   try {
@@ -361,21 +363,21 @@ async function resolveYouTubeEmbed(url: string): Promise<ResolvedUrlEmbed | unde
     if (resp.ok) {
       const data = (await resp.json()) as OEmbedPayload;
       return {
-        kind: "card",
+        kind: "rich",
         sourceUrl: url,
-        imageUrl,
         title: cleanMetadataText(data.title),
+        html,
         siteName: cleanMetadataText(data.provider_name) || "YouTube",
       };
     }
   } catch {
-    // Fall through to title-less card.
+    // Fall through to title-less embed.
   }
 
   return {
-    kind: "card",
+    kind: "rich",
     sourceUrl: url,
-    imageUrl,
+    html,
     siteName: "YouTube",
   };
 }
@@ -673,7 +675,14 @@ function cleanMetadataText(value?: string): string | undefined {
   return cleaned || undefined;
 }
 
-function extractYouTubeVideoId(url: string): string | undefined {
+function buildYouTubeEmbedHtml(embedInfo: YouTubeEmbedInfo): string {
+  const height = embedInfo.isShort ? 631 : 200;
+  const encodedVideoId = encodeURIComponent(embedInfo.videoId);
+
+  return `<iframe width="355" height="${height}" src="https://www.youtube.com/embed/${encodedVideoId}" title="YouTube video player" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>`;
+}
+
+function extractYouTubeEmbedInfo(url: string): YouTubeEmbedInfo | undefined {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -683,42 +692,26 @@ function extractYouTubeVideoId(url: string): string | undefined {
 
   const hostname = parsed.hostname.toLowerCase();
   if (hostname === "youtu.be") {
-    return parsed.pathname.split("/").filter(Boolean)[0];
+    const videoId = parsed.pathname.split("/").filter(Boolean)[0];
+    return videoId ? { videoId, isShort: false } : undefined;
   }
 
   if (hostname === "www.youtube.com" || hostname === "youtube.com" || hostname === "m.youtube.com") {
     if (parsed.pathname === "/watch") {
-      return parsed.searchParams.get("v") ?? undefined;
+      const videoId = parsed.searchParams.get("v");
+      return videoId ? { videoId, isShort: false } : undefined;
     }
 
     const segments = parsed.pathname.split("/").filter(Boolean);
-    if (segments[0] === "shorts" || segments[0] === "live" || segments[0] === "embed") {
-      return segments[1];
+    if (segments[0] === "shorts" && segments[1]) {
+      return { videoId: segments[1], isShort: true };
+    }
+    if ((segments[0] === "live" || segments[0] === "embed") && segments[1]) {
+      return { videoId: segments[1], isShort: false };
     }
   }
 
   return undefined;
-}
-
-async function canFetchImage(url: string): Promise<boolean> {
-  if (!isAllowedPreviewUrl(url)) {
-    return false;
-  }
-  try {
-    const resp = await fetch(url, {
-      method: "HEAD",
-      headers: { "User-Agent": "apricot-irc-proxy/0.1" },
-      redirect: "follow",
-      signal: AbortSignal.timeout(5_000),
-    });
-    if (!isAllowedPreviewUrl(resp.url || url)) {
-      return false;
-    }
-    const contentType = resp.headers.get("Content-Type") || "";
-    return resp.ok && contentType.startsWith("image/");
-  } catch {
-    return false;
-  }
 }
 
 function truncate(text: string): string {
