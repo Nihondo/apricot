@@ -1346,25 +1346,24 @@ function applyMessagesDelta(html) {
     return;
   }
   var template = document.createElement("template");
-  var deltaRoot = document.createElement("div");
   template.innerHTML = html;
-  deltaRoot.appendChild(template.content);
+  var addedNodes = Array.prototype.slice.call(template.content.childNodes);
   if (apricotShouldAutoStick) {
-    shell.appendChild(deltaRoot);
+    shell.appendChild(template.content);
   } else {
-    shell.prepend(deltaRoot);
+    shell.prepend(template.content);
   }
   if (typeof window.apricotRefreshRichEmbeds === "function") {
-    window.apricotRefreshRichEmbeds(deltaRoot);
+    addedNodes.forEach(function (node) {
+      if (!(node instanceof Element)) {
+        return;
+      }
+      if (!node.querySelector("[data-apricot-rich-embed]")) {
+        return;
+      }
+      window.apricotRefreshRichEmbeds(node);
+    });
   }
-  while (deltaRoot.firstChild) {
-    if (apricotShouldAutoStick) {
-      shell.insertBefore(deltaRoot.firstChild, deltaRoot);
-    } else {
-      shell.insertBefore(deltaRoot.lastChild, deltaRoot);
-    }
-  }
-  deltaRoot.remove();
 }
 
 function resetHeartbeatState() {
