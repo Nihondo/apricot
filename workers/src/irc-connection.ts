@@ -19,10 +19,6 @@ export interface IrcServerConfig {
   encoding?: string; // e.g. "iso-2022-jp", "euc-jp", "shift_jis" (default: utf-8)
 }
 
-export interface IrcServerConnectionOptions {
-  connectTimeoutMs?: number;
-}
-
 export type MessageCallback = (msg: IrcMessage) => void | Promise<void>;
 export type CloseCallback = () => void | Promise<void>;
 
@@ -34,21 +30,16 @@ export class IrcServerConnection {
   private onMessage: MessageCallback;
   private onClose: CloseCallback;
   private config: IrcServerConfig;
-  private options: IrcServerConnectionOptions;
   private _connected = false;
-  private isClosed = false;
-  private closePromise: Promise<void> | null = null;
 
   constructor(
     config: IrcServerConfig,
     onMessage: MessageCallback,
-    onClose: CloseCallback,
-    options: IrcServerConnectionOptions = {}
+    onClose: CloseCallback
   ) {
     this.config = config;
     this.onMessage = onMessage;
     this.onClose = onClose;
-    this.options = options;
   }
 
   get connected(): boolean {
@@ -71,24 +62,11 @@ export class IrcServerConnection {
     console.log(`IRC: connecting to ${address.hostname}:${address.port} (tls=${!!this.config.tls})`);
     this.socket = connect(address, options);
     this.writer = this.socket.writable.getWriter();
-    this.isClosed = false;
-    this.closePromise = null;
-    this.buffer = "";
-
-    void this.socket.closed
-      .catch((error) => {
-        console.error("IRC socket closed with error", error);
-      })
-      .finally(() => {
-        void this.finalizeClose();
-      });
-
-    await this.waitForSocketOpen(this.socket);
 
     // Start reading in background
     void this.readLoop().catch((error) => {
+      this._connected = false;
       console.error("IRC read loop failed", error);
-      void this.finalizeClose();
     });
 
     // IRC registration sequence
@@ -99,32 +77,6 @@ export class IrcServerConnection {
     await this.sendRaw(
       `USER ${this.config.user} 0 * :${this.config.realname}`
     );
-  }
-
-  /**
-   * Waits until the outbound TCP socket is opened or times out.
-   */
-  private async waitForSocketOpen(socket: Socket): Promise<void> {
-    const connectTimeoutMs = this.options.connectTimeoutMs ?? 10_000;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    try {
-      await Promise.race([
-        socket.opened,
-        new Promise<never>((_, reject) => {
-          timeoutId = setTimeout(() => {
-            reject(new Error(`socket open timed out after ${connectTimeoutMs}ms`));
-          }, connectTimeoutMs);
-        }),
-      ]);
-    } catch (error) {
-      await this.finalizeClose();
-      throw error;
-    } finally {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
-    }
   }
 
   private encodeForServer(text: string): Uint8Array {
@@ -182,8 +134,9 @@ export class IrcServerConnection {
       console.error("IRC read error:", e);
     } finally {
       console.log("IRC: readLoop ended, closing connection");
+      this._connected = false;
       reader.releaseLock();
-      await this.finalizeClose();
+      await this.onClose();
     }
   }
 
@@ -191,15 +144,12 @@ export class IrcServerConnection {
     if (/[\r\n\0]/.test(line)) {
       throw new Error("unsafe IRC line");
     }
-    if (!this.writer) {
-      throw new Error("socket writer unavailable");
-    }
+    if (!this.writer) return;
     try {
       await this.writer.write(this.encodeForServer(line + "\r\n"));
-    } catch (error) {
-      console.error("IRC write failed", error);
-      await this.finalizeClose();
-      throw error;
+    } catch {
+      // Write failed — connection likely closed
+      this._connected = false;
     }
   }
 
@@ -212,59 +162,15 @@ export class IrcServerConnection {
   }
 
   async close(): Promise<void> {
-    await this.finalizeClose();
-  }
-
-  /**
-   * Closes the underlying socket and invokes the close callback once.
-   */
-  private async finalizeClose(): Promise<void> {
-    if (this.isClosed) {
-      if (this.closePromise) {
-        await this.closePromise;
-      }
-      return;
-    }
-    if (this.closePromise) {
-      await this.closePromise;
-      return;
-    }
-
-    const socket = this.socket;
-    const writer = this.writer;
-
-    this.socket = null;
-    this.writer = null;
     this._connected = false;
-    this.isClosed = true;
-    this.buffer = "";
-
-    this.closePromise = (async () => {
-      try {
-        if (writer) {
-          try {
-            writer.releaseLock();
-          } catch {
-            // Ignore release errors during shutdown.
-          }
-        }
-
-        if (socket) {
-          try {
-            await socket.close();
-          } catch {
-            // Ignore close errors during shutdown.
-          }
-        }
-      } finally {
-        await this.onClose();
-      }
-    })();
-
     try {
-      await this.closePromise;
-    } finally {
-      this.closePromise = null;
+      if (this.writer) {
+        await this.writer.close();
+        this.writer = null;
+      }
+      this.socket = null;
+    } catch {
+      // Ignore close errors
     }
   }
 }

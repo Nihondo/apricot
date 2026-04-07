@@ -73,12 +73,12 @@ import {
   handleWebSettings,
 } from "./irc-proxy/web-handlers";
 
+const reconnectDelayMs = 5_000;
 const proxyConfigStorageKey = "proxy:config:v1";
 const proxyIdStorageKey = "proxy:id";
 const webLogsStorageKey = "web:logs:v1";
 const webUiSettingsStorageKey = "web:ui-settings:v1";
 const nickErrorCodes = new Set(["431", "432", "433", "436", "437", "438", "447", "484", "485"]);
-const registrationFailureCodes = new Set(["431", "432", "433", "436", "437", "438", "447", "451", "462", "464", "465", "484", "485"]);
 type WebChannelUpdateMessage = {
   type: "channel-updated";
   channel: string;
@@ -94,17 +94,6 @@ type WebUpdateSocketMessage =
   | WebChannelUpdateMessage
   | WebHeartbeatPingMessage
   | WebHeartbeatPongMessage;
-
-function parseIntegerEnv(value: string | undefined, fallbackValue: number): number {
-  const parsedValue = Number.parseInt(value ?? "", 10);
-  return Number.isFinite(parsedValue) && parsedValue > 0 ? parsedValue : fallbackValue;
-}
-
-function parseRatioEnv(value: string | undefined, fallbackValue: number): number {
-  const parsedValue = Number.parseFloat(value ?? "");
-  return Number.isFinite(parsedValue) && parsedValue >= 0 ? parsedValue : fallbackValue;
-}
-
 export class IrcProxyDO implements DurableObject {
   private state: DurableObjectState;
   private clients = new Set<WebSocket>();
@@ -132,30 +121,10 @@ export class IrcProxyDO implements DurableObject {
 
   /** Keepalive alarm interval in ms */
   private keepaliveMs: number;
-  private readonly connectTimeoutMs: number;
-  private readonly registrationTimeoutMs: number;
-  private readonly reconnectBaseDelayMs: number;
-  private readonly reconnectMaxDelayMs: number;
-  private readonly reconnectJitterRatio: number;
-  private readonly idlePingIntervalMs: number;
-  private readonly pingTimeoutMs: number;
   private hasInitializedProxyConfig = false;
   private hasAttemptedStartupAutoConnect = false;
   private connectPromise: Promise<void> | null = null;
   private suppressAutoReconnectOnClose = false;
-  private connectionGeneration = 0;
-  private connectedGeneration = 0;
-  private reconnectAttempt = 0;
-  private lastServerActivityAt = 0;
-  private pendingPingToken: string | null = null;
-  private pendingPingStartedAt = 0;
-  private pendingPingDeadlineAt = 0;
-  private pendingRegistration: {
-    generation: number;
-    resolve: () => void;
-    reject: (error: Error) => void;
-    timer: ReturnType<typeof setTimeout>;
-  } | null = null;
 
   /** Pending NICK change request waiting for server confirmation */
   private pendingNickChange: {
@@ -171,13 +140,6 @@ export class IrcProxyDO implements DurableObject {
     this.browserRenderingConfig = buildBrowserRenderingConfig(env);
     this.config = this.envConfig;
     this.keepaliveMs = (parseInt(env.KEEPALIVE_INTERVAL || "60", 10)) * 1000;
-    this.connectTimeoutMs = parseIntegerEnv(env.IRC_CONNECT_TIMEOUT_MS, 10_000);
-    this.registrationTimeoutMs = parseIntegerEnv(env.IRC_REGISTRATION_TIMEOUT_MS, 20_000);
-    this.reconnectBaseDelayMs = parseIntegerEnv(env.IRC_RECONNECT_BASE_DELAY_MS, 5_000);
-    this.reconnectMaxDelayMs = parseIntegerEnv(env.IRC_RECONNECT_MAX_DELAY_MS, 60_000);
-    this.reconnectJitterRatio = parseRatioEnv(env.IRC_RECONNECT_JITTER_RATIO, 0.2);
-    this.idlePingIntervalMs = parseIntegerEnv(env.IRC_IDLE_PING_INTERVAL_MS, 240_000);
-    this.pingTimeoutMs = parseIntegerEnv(env.IRC_PING_TIMEOUT_MS, 90_000);
     if (this.config) {
       this.nick = this.config.server.nick;
     }
@@ -340,7 +302,6 @@ export class IrcProxyDO implements DurableObject {
         persistProxyConfig: this.persistProxyConfig.bind(this),
         postChannelMessage: this.postChannelMessage.bind(this),
         requestNickChange: this.requestNickChange.bind(this),
-        resetConnectionRecoveryState: this.resetConnectionRecoveryState.bind(this),
         setSuppressAutoReconnectOnClose: (value) => {
           this.suppressAutoReconnectOnClose = value;
         },
@@ -368,7 +329,6 @@ export class IrcProxyDO implements DurableObject {
         persistProxyConfig: this.persistProxyConfig.bind(this),
         postChannelMessage: this.postChannelMessage.bind(this),
         requestNickChange: this.requestNickChange.bind(this),
-        resetConnectionRecoveryState: this.resetConnectionRecoveryState.bind(this),
         setSuppressAutoReconnectOnClose: (value) => {
           this.suppressAutoReconnectOnClose = value;
         },
@@ -391,7 +351,6 @@ export class IrcProxyDO implements DurableObject {
         persistProxyConfig: this.persistProxyConfig.bind(this),
         postChannelMessage: this.postChannelMessage.bind(this),
         requestNickChange: this.requestNickChange.bind(this),
-        resetConnectionRecoveryState: this.resetConnectionRecoveryState.bind(this),
         setSuppressAutoReconnectOnClose: (value) => {
           this.suppressAutoReconnectOnClose = value;
         },
@@ -664,10 +623,7 @@ export class IrcProxyDO implements DurableObject {
     await this.ensureProxyConfigInitialized();
 
     if (this.serverConn?.connected) {
-      await this.performConnectionHealthCheck();
-      if (this.serverConn?.connected) {
-        await this.scheduleKeepaliveAlarm();
-      }
+      await this.scheduleKeepaliveAlarm();
       return;
     }
 
@@ -980,73 +936,59 @@ export class IrcProxyDO implements DurableObject {
     if (!this.config) return;
 
     const { ports } = this.config;
-    let lastError: Error | null = null;
+    let lastError: unknown;
 
     for (const port of ports) {
-      const generation = ++this.connectionGeneration;
       const cfg = { ...this.config.server, port };
-      const registrationPromise = this.createRegistrationPromise(generation);
 
       this.serverConn = new IrcServerConnection(
         cfg,
         // onMessage — handle messages from IRC server
         async (msg) => {
-          await this.handleServerMessage(msg, generation);
+          await this.handleServerMessage(msg);
         },
         // onClose
         async () => {
-          await this.handleServerClose(generation);
-        },
-        {
-          connectTimeoutMs: this.connectTimeoutMs,
+          const ctx = this.makeContext(0);
+          await this.modules.dispatchLifecycle("onServerClose", ctx);
+          this.serverConn = null;
+          await this.persistCurrentWebLogs();
+
+          // Stop keepalive alarm
+          await this.state.storage.deleteAlarm();
+
+          // Notify clients
+          this.broadcast({
+            prefix: "apricot",
+            command: "NOTICE",
+            params: ["*", "Disconnected from IRC server"],
+          });
+
+          if (this.consumeAutoReconnectOnClose()) {
+            await this.scheduleReconnectAlarm();
+          }
         }
       );
-      this.resetConnectionHealthState();
 
       try {
-        console.log(`IRC: connect attempt generation=${generation} port=${port}`);
         await this.serverConn.connect();
-        await registrationPromise;
         return; // Success
       } catch (err) {
         console.error(`IRC: failed to connect on port ${port}`, err);
-        lastError = err instanceof Error ? err : new Error(String(err));
-        this.rejectPendingRegistration(generation, lastError);
-        await this.serverConn?.close().catch(() => undefined);
+        lastError = err;
         this.serverConn = null;
       }
     }
 
-    throw lastError ?? new Error("failed to connect to IRC server");
+    throw lastError;
   }
 
-  private async handleServerMessage(
-    msg: IrcMessage,
-    generation: number = this.connectionGeneration,
-  ): Promise<void> {
-    if (generation !== this.connectionGeneration) {
-      console.log(`IRC: ignoring stale message for generation=${generation}`);
-      return;
-    }
-
+  private async handleServerMessage(msg: IrcMessage): Promise<void> {
     const cmd = msg.command;
-    this.lastServerActivityAt = Date.now();
-
-    if (cmd === "PONG") {
-      const pongToken = msg.params.at(-1) ?? msg.params[0] ?? "";
-      if (this.pendingPingToken && pongToken === this.pendingPingToken) {
-        console.log(`IRC: received health-check pong token=${pongToken}`);
-        this.clearPendingPingState();
-      }
-    }
 
     // Handle 001 RPL_WELCOME — server registration complete
     if (cmd === "001") {
       this.serverConn?.markConnected();
-      this.connectedGeneration = generation;
-      this.resolvePendingRegistration(generation);
-      this.reconnectAttempt = 0;
-      this.clearPendingPingState();
       this.serverName = msg.prefix || "irc";
       if (msg.params[0]) {
         this.nick = msg.params[0];
@@ -1063,13 +1005,6 @@ export class IrcProxyDO implements DurableObject {
           await this.serverConn.send({ command: "JOIN", params: [channel] });
         }
       }
-    }
-
-    if ((cmd === "ERROR" || registrationFailureCodes.has(cmd)) && this.pendingRegistration?.generation === generation) {
-      const errorMessage = msg.params.at(-1) || "registration failed";
-      this.rejectPendingRegistration(generation, new Error(errorMessage));
-      await this.serverConn?.close();
-      return;
     }
 
     // Handle NICK change for self
@@ -1352,9 +1287,6 @@ export class IrcProxyDO implements DurableObject {
   }
 
   private async scheduleReconnectAlarm(): Promise<void> {
-    this.reconnectAttempt += 1;
-    const reconnectDelayMs = this.calculateReconnectDelayMs(this.reconnectAttempt);
-    console.log(`IRC: scheduling reconnect attempt=${this.reconnectAttempt} delayMs=${reconnectDelayMs}`);
     await this.state.storage.setAlarm(Date.now() + reconnectDelayMs);
   }
 
@@ -1363,186 +1295,6 @@ export class IrcProxyDO implements DurableObject {
       && !this.suppressAutoReconnectOnClose;
     this.suppressAutoReconnectOnClose = false;
     return shouldReconnect;
-  }
-
-  /**
-   * Clears pending ping state and resets idle activity tracking.
-   */
-  private resetConnectionHealthState(lastActivityAt = 0): void {
-    this.lastServerActivityAt = lastActivityAt;
-    this.clearPendingPingState();
-  }
-
-  /**
-   * Clears the in-flight active ping request, if any.
-   */
-  private clearPendingPingState(): void {
-    this.pendingPingToken = null;
-    this.pendingPingStartedAt = 0;
-    this.pendingPingDeadlineAt = 0;
-  }
-
-  /**
-   * Resets reconnect counters and health-check state, used for manual disconnects.
-   */
-  private resetConnectionRecoveryState(): void {
-    this.reconnectAttempt = 0;
-    this.resetConnectionHealthState();
-    this.rejectPendingRegistration(this.connectionGeneration, new Error("connection recovery state reset"));
-  }
-
-  /**
-   * Creates a registration wait promise for the given connection generation.
-   */
-  private createRegistrationPromise(generation: number): Promise<void> {
-    this.rejectPendingRegistration(generation - 1, new Error("superseded by a new connection attempt"));
-
-    const registrationPromise = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.rejectPendingRegistration(
-          generation,
-          new Error(`registration timed out after ${this.registrationTimeoutMs}ms`),
-        );
-      }, this.registrationTimeoutMs);
-
-      this.pendingRegistration = {
-        generation,
-        resolve,
-        reject,
-        timer,
-      };
-    });
-
-    void registrationPromise.catch(() => undefined);
-    return registrationPromise;
-  }
-
-  /**
-   * Marks the pending registration as successful for the current generation.
-   */
-  private resolvePendingRegistration(generation: number): void {
-    if (!this.pendingRegistration || this.pendingRegistration.generation !== generation) {
-      return;
-    }
-
-    clearTimeout(this.pendingRegistration.timer);
-    this.pendingRegistration.resolve();
-    this.pendingRegistration = null;
-  }
-
-  /**
-   * Rejects the pending registration wait for the current generation.
-   */
-  private rejectPendingRegistration(generation: number, error: Error): void {
-    if (!this.pendingRegistration || this.pendingRegistration.generation !== generation) {
-      return;
-    }
-
-    clearTimeout(this.pendingRegistration.timer);
-    this.pendingRegistration.reject(error);
-    this.pendingRegistration = null;
-  }
-
-  /**
-   * Handles socket close for the active connection generation only.
-   */
-  private async handleServerClose(generation: number): Promise<void> {
-    if (generation !== this.connectionGeneration) {
-      console.log(`IRC: stale close ignored generation=${generation} current=${this.connectionGeneration}`);
-      return;
-    }
-
-    const wasConnected = this.connectedGeneration === generation;
-    if (wasConnected) {
-      this.connectedGeneration = 0;
-    }
-
-    this.rejectPendingRegistration(generation, new Error("connection closed before registration completed"));
-    this.resetConnectionHealthState();
-    this.serverConn = null;
-
-    await this.state.storage.deleteAlarm();
-
-    if (!wasConnected) {
-      return;
-    }
-
-    const ctx = this.makeContext(0);
-    await this.modules.dispatchLifecycle("onServerClose", ctx);
-    await this.persistCurrentWebLogs();
-
-    this.broadcast({
-      prefix: "apricot",
-      command: "NOTICE",
-      params: ["*", "Disconnected from IRC server"],
-    });
-
-    if (this.consumeAutoReconnectOnClose()) {
-      await this.scheduleReconnectAlarm();
-    }
-  }
-
-  /**
-   * Performs idle-time health checking by sending IRC PING and watching for activity.
-   */
-  private async performConnectionHealthCheck(): Promise<void> {
-    const serverConn = this.serverConn;
-    if (!serverConn?.connected) {
-      return;
-    }
-
-    const now = Date.now();
-    if (this.pendingPingToken) {
-      if (this.lastServerActivityAt > this.pendingPingStartedAt) {
-        console.log("IRC: health check recovered from non-PONG activity");
-        this.clearPendingPingState();
-        return;
-      }
-
-      if (now < this.pendingPingDeadlineAt) {
-        return;
-      }
-
-      console.error(`IRC: ping timeout token=${this.pendingPingToken}`);
-      this.clearPendingPingState();
-      await serverConn.close();
-      return;
-    }
-
-    if (!this.lastServerActivityAt) {
-      this.lastServerActivityAt = now;
-      return;
-    }
-
-    if (now - this.lastServerActivityAt < this.idlePingIntervalMs) {
-      return;
-    }
-
-    const pingToken = `apricot:${now}`;
-    this.pendingPingToken = pingToken;
-    this.pendingPingStartedAt = now;
-    this.pendingPingDeadlineAt = now + this.pingTimeoutMs;
-    console.log(`IRC: sending health-check ping token=${pingToken}`);
-
-    try {
-      await serverConn.send({ command: "PING", params: [pingToken] });
-    } catch (error) {
-      console.error("IRC: failed to send health-check ping", error);
-      this.clearPendingPingState();
-    }
-  }
-
-  /**
-   * Computes the next reconnect delay with exponential backoff and jitter.
-   */
-  private calculateReconnectDelayMs(attempt: number): number {
-    const exponentialDelayMs = Math.min(
-      this.reconnectBaseDelayMs * Math.pow(2, Math.max(0, attempt - 1)),
-      this.reconnectMaxDelayMs,
-    );
-    const jitterScale = this.reconnectJitterRatio * ((Math.random() * 2) - 1);
-    const jitteredDelayMs = exponentialDelayMs * (1 + jitterScale);
-    return Math.max(0, Math.round(jitteredDelayMs));
   }
 
   private async loadPersistedWebLogs(): Promise<void> {
