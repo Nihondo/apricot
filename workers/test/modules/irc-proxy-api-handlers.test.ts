@@ -38,6 +38,7 @@ describe("irc-proxy/api-handlers", () => {
       persistProxyConfig,
       postChannelMessage: vi.fn(),
       requestNickChange: vi.fn(),
+      resetConnectionRecoveryState: vi.fn(),
       setSuppressAutoReconnectOnClose: vi.fn(),
     });
     const payload = await response.json() as { config: { nick: string; autojoin: string[] } };
@@ -67,6 +68,7 @@ describe("irc-proxy/api-handlers", () => {
   it("disconnects an active IRC connection through the shared helper", async () => {
     const close = vi.fn(async () => undefined);
     const deleteAlarm = vi.fn(async () => undefined);
+    const resetConnectionRecoveryState = vi.fn();
     const setSuppressAutoReconnectOnClose = vi.fn();
 
     const response = await handleApiDisconnect({
@@ -87,11 +89,13 @@ describe("irc-proxy/api-handlers", () => {
       persistProxyConfig: vi.fn(),
       postChannelMessage: vi.fn(),
       requestNickChange: vi.fn(),
+      resetConnectionRecoveryState,
       setSuppressAutoReconnectOnClose,
     });
 
     expect(response.status).toBe(200);
     expect(setSuppressAutoReconnectOnClose).toHaveBeenCalledWith(true);
+    expect(resetConnectionRecoveryState).toHaveBeenCalled();
     expect(deleteAlarm).toHaveBeenCalled();
     expect(close).toHaveBeenCalled();
   });

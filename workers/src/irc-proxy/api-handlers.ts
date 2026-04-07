@@ -47,6 +47,7 @@ interface ApiHandlerContext {
     embed?: ResolvedUrlEmbed,
   ): Promise<PostMessageResult>;
   requestNickChange(nick: string | undefined): Promise<NickChangeResult>;
+  resetConnectionRecoveryState(): void;
   setSuppressAutoReconnectOnClose(value: boolean): void;
 }
 
@@ -202,6 +203,7 @@ export async function handleApiDisconnect(context: ApiHandlerContext): Promise<R
     return connectedError;
   }
   context.setSuppressAutoReconnectOnClose(true);
+  context.resetConnectionRecoveryState();
   await context.state.storage.deleteAlarm();
   await context.serverConn!.close();
   return jsonOk({ ok: true });
