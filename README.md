@@ -45,6 +45,13 @@ IRC_REALNAME = "apricot IRC Proxy"
 IRC_TLS = "false"
 IRC_AUTO_CONNECT_ON_STARTUP = "true"
 IRC_AUTO_RECONNECT_ON_DISCONNECT = "true"
+IRC_CONNECT_TIMEOUT_MS = "10000"
+IRC_REGISTRATION_TIMEOUT_MS = "120000"
+IRC_RECONNECT_BASE_DELAY_MS = "5000"
+IRC_RECONNECT_MAX_DELAY_MS = "60000"
+IRC_RECONNECT_JITTER_RATIO = "0.2"
+IRC_IDLE_PING_INTERVAL_MS = "240000"
+IRC_PING_TIMEOUT_MS = "90000"
 IRC_AUTOJOIN = "#general,#test"
 IRC_ENCODING = "iso-2022-jp"   # 日本語サーバーの場合
 TIMEZONE_OFFSET = "9"           # JST (UTC+9)
@@ -399,8 +406,15 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 | `IRC_TLS` | ─ | `false` | IRC サーバーへの TCP 接続に TLS を使用（`true` / `false`） |
 | `IRC_PASSWORD` | ─ | ─ | IRC サーバーパスワード（secret 推奨） |
 | `CLIENT_PASSWORD` | ─ | ─ | WebSocket クライアント接続と Web UI ログインの共通パスワード。未設定時は `/web/*` と `/ws` が `503` を返す |
-| `IRC_AUTO_CONNECT_ON_STARTUP` | ─ | `false` | Durable Object インスタンス起動時に IRC へ接続開始 |
-| `IRC_AUTO_RECONNECT_ON_DISCONNECT` | ─ | `false` | IRC 切断時に 5 秒後の自動再接続を有効化（API 手動切断時は抑制） |
+| `IRC_AUTO_CONNECT_ON_STARTUP` | ─ | `false` | Durable Object インスタンス起動時に IRC へ接続開始。初回リクエストは接続完了を待たず、そのまま返る |
+| `IRC_AUTO_RECONNECT_ON_DISCONNECT` | ─ | `false` | IRC 切断時に自動再接続を有効化（API 手動切断時は抑制） |
+| `IRC_CONNECT_TIMEOUT_MS` | ─ | `10000` | TCP ソケット確立待ちのタイムアウト（ミリ秒） |
+| `IRC_REGISTRATION_TIMEOUT_MS` | ─ | `120000` | `001` welcome を待つ登録タイムアウト。登録前メッセージを受信している間は延長される無通信タイムアウト（ミリ秒） |
+| `IRC_RECONNECT_BASE_DELAY_MS` | ─ | `5000` | 自動再接続バックオフの初期待機時間（ミリ秒） |
+| `IRC_RECONNECT_MAX_DELAY_MS` | ─ | `60000` | 自動再接続バックオフの最大待機時間（ミリ秒） |
+| `IRC_RECONNECT_JITTER_RATIO` | ─ | `0.2` | 自動再接続待機時間に加えるジッター比率 |
+| `IRC_IDLE_PING_INTERVAL_MS` | ─ | `240000` | サーバーからの受信が止まった際に能動 `PING` を送るまでのアイドル時間（ミリ秒） |
+| `IRC_PING_TIMEOUT_MS` | ─ | `90000` | 能動 `PING` 送信後に `PONG` または他の受信を待つ時間（ミリ秒） |
 | `IRC_AUTOJOIN` | ─ | ─ | 自動参加チャンネルのデフォルト値（カンマ区切り、例: `#general,#test`）。プロキシ ID ごとに `PUT /api/config` で上書き可能 |
 | `IRC_ENCODING` | ─ | `utf-8` | IRC サーバーの文字コード（例: `iso-2022-jp`、`euc-jp`、`shift_jis`） |
 | `ENABLE_REMOTE_URL_PREVIEW` | ─ | `false` | URL の自動プレビュー解決を有効化する総合スイッチ。受信メッセージ・自分の投稿（Web composer / API message）に適用。`POST /api/post` の `url` 指定は常に有効 |
@@ -409,7 +423,7 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 | `WEB_LOG_MAX_LINES` | ─ | `200` | チャンネルごとのログ保持件数 |
 | `API_KEY` | ✅ | ─ | 外部 API 認証キー（secret 必須） |
 
-> **補足**: `IRC_AUTO_CONNECT_ON_STARTUP` の「起動時」は、Cloudflare Workers 全体の起動ではなく、各プロキシ ID の Durable Object インスタンスが最初のリクエストや WebSocket 接続で起動したタイミングを指します。
+> **補足**: `IRC_AUTO_CONNECT_ON_STARTUP` の「起動時」は、Cloudflare Workers 全体の起動ではなく、各プロキシ ID の Durable Object インスタンスが最初のリクエストや WebSocket 接続で起動したタイミングを指します。接続処理はバックグラウンドで始まり、`/api/status` や Web UI の初回応答はブロックしません。
 
 ### プロキシ ID について
 

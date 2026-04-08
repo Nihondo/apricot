@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { connect } from "cloudflare:sockets";
 
 const { extractUrlMetadataMock, resolveMessageEmbedMock, resolveUrlEmbedMock } = vi.hoisted(() => ({
   extractUrlMetadataMock: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock("../../src/templates/settings.html", () => ({
 
 import { IrcProxyDO } from "../../src/irc-proxy";
 import type { PersistedWebLogs, WebUiSettings } from "../../src/modules/web";
+import { createMockSocket } from "../helpers/mock-socket";
 
 const webLogsStorageKey = "web:logs:v1";
 const webUiSettingsStorageKey = "web:ui-settings:v1";
@@ -45,6 +47,9 @@ const proxyIdStorageKey = "proxy:id";
 
 class FakeStorage {
   private values = new Map<string, unknown>();
+  lastAlarmAt: number | null = null;
+  alarmTimes: number[] = [];
+  deleteAlarmCalls = 0;
 
   seed(key: string, value: unknown): void {
     this.values.set(key, structuredClone(value));
@@ -67,9 +72,15 @@ class FakeStorage {
     return this.values.delete(key);
   }
 
-  async setAlarm(_time: number): Promise<void> {}
+  async setAlarm(time: number): Promise<void> {
+    this.lastAlarmAt = time;
+    this.alarmTimes.push(time);
+  }
 
-  async deleteAlarm(): Promise<void> {}
+  async deleteAlarm(): Promise<void> {
+    this.lastAlarmAt = null;
+    this.deleteAlarmCalls += 1;
+  }
 }
 
 class FakeState {
@@ -119,6 +130,8 @@ async function loginWeb(proxy: IrcProxyDO): Promise<string> {
 describe("IrcProxyDO web log persistence", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();
+    vi.useRealTimers();
+    vi.mocked(connect).mockReset();
     extractUrlMetadataMock.mockReset();
     resolveMessageEmbedMock.mockReset();
     resolveUrlEmbedMock.mockReset();
@@ -1907,5 +1920,206 @@ describe("IrcProxyDO web log persistence", () => {
     expect((proxy as any).consumeAutoReconnectOnClose()).toBe(false);
     expect((proxy as any).suppressAutoReconnectOnClose).toBe(false);
     expect((proxy as any).consumeAutoReconnectOnClose()).toBe(true);
+  });
+
+  it("does not block status requests while startup auto-connect is still pending", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({ IRC_AUTO_CONNECT_ON_STARTUP: "true" }),
+    );
+    await state.initPromise;
+
+    const socket = createMockSocket();
+    vi.mocked(connect).mockReturnValue(socket.socket);
+
+    const response = await proxy.fetch(new Request("https://example.com/api/status", {
+      headers: { "X-Proxy-Prefix": "/proxy/main" },
+    }));
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({ connected: false, nick: "apricot" });
+    expect(connect).toHaveBeenCalledTimes(1);
+    expect((proxy as any).connectPromise).toBeTruthy();
+  });
+
+  it("waits for 001 before treating the IRC connection as established", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv(),
+    );
+    await state.initPromise;
+
+    const socket = createMockSocket();
+    vi.mocked(connect).mockReturnValue(socket.socket);
+
+    let hasResolved = false;
+    const connectPromise = (proxy as any).ensureServerConnection().then(() => {
+      hasResolved = true;
+    });
+
+    socket.opened.resolve({} as SocketInfo);
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect((proxy as any).serverConn?.connected).toBe(false);
+    expect(hasResolved).toBe(false);
+
+    socket.pushMessage(":irc.example.com 001 apricot :Welcome");
+    await connectPromise;
+
+    expect((proxy as any).serverConn?.connected).toBe(true);
+    expect((proxy as any).reconnectAttempt).toBe(0);
+    expect(state.storage.alarmTimes.length).toBeGreaterThan(0);
+  });
+
+  it("fails over to the next port when registration times out", async () => {
+    vi.useFakeTimers();
+
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({
+        IRC_PORT: "6667,6668",
+        IRC_REGISTRATION_TIMEOUT_MS: "100",
+      }),
+    );
+    await state.initPromise;
+
+    const firstSocket = createMockSocket();
+    const secondSocket = createMockSocket();
+    vi.mocked(connect)
+      .mockReturnValueOnce(firstSocket.socket)
+      .mockReturnValueOnce(secondSocket.socket);
+
+    const connectPromise = (proxy as any).ensureServerConnection();
+    firstSocket.opened.resolve({} as SocketInfo);
+    await Promise.resolve();
+
+    await vi.advanceTimersByTimeAsync(100);
+    secondSocket.opened.resolve({} as SocketInfo);
+    await Promise.resolve();
+    secondSocket.pushMessage(":irc.example.com 001 apricot :Welcome");
+    await connectPromise;
+
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(firstSocket.close).toHaveBeenCalled();
+    expect((proxy as any).serverConn?.connected).toBe(true);
+  });
+
+  it("extends registration wait while pre-registration server messages are still arriving", async () => {
+    vi.useFakeTimers();
+
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({
+        IRC_REGISTRATION_TIMEOUT_MS: "100",
+      }),
+    );
+    await state.initPromise;
+
+    const socket = createMockSocket();
+    vi.mocked(connect).mockReturnValue(socket.socket);
+
+    const connectPromise = (proxy as any).ensureServerConnection();
+    socket.opened.resolve({} as SocketInfo);
+    await Promise.resolve();
+
+    await vi.advanceTimersByTimeAsync(90);
+    socket.pushMessage(":irc.friend-chat.jp NOTICE AUTH :*** Looking up your hostname...");
+    await Promise.resolve();
+
+    await vi.advanceTimersByTimeAsync(90);
+    expect((proxy as any).serverConn).toBeTruthy();
+
+    socket.pushMessage(":irc.friend-chat.jp 001 apricot :Welcome");
+    await connectPromise;
+
+    expect((proxy as any).serverConn?.connected).toBe(true);
+  });
+
+  it("schedules exponential reconnect backoff after a failed reconnect attempt", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-07T00:00:00Z"));
+
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({
+        IRC_AUTO_RECONNECT_ON_DISCONNECT: "true",
+        IRC_RECONNECT_BASE_DELAY_MS: "5000",
+        IRC_RECONNECT_MAX_DELAY_MS: "60000",
+        IRC_RECONNECT_JITTER_RATIO: "0",
+      }),
+    );
+    await state.initPromise;
+
+    const socket = createMockSocket();
+    vi.mocked(connect).mockReturnValue(socket.socket);
+    socket.opened.reject(new Error("tcp open failed"));
+
+    await (proxy as any).alarm();
+
+    expect((proxy as any).reconnectAttempt).toBe(1);
+    expect(state.storage.lastAlarmAt).toBe(Date.now() + 5000);
+  });
+
+  it("sends a health-check ping after idle time and reconnects on ping timeout", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-04-07T00:00:00Z"));
+
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv({
+        IRC_AUTO_RECONNECT_ON_DISCONNECT: "true",
+        IRC_RECONNECT_BASE_DELAY_MS: "5000",
+        IRC_RECONNECT_JITTER_RATIO: "0",
+        IRC_IDLE_PING_INTERVAL_MS: "10",
+        IRC_PING_TIMEOUT_MS: "20",
+      }),
+    );
+    await state.initPromise;
+
+    const socket = createMockSocket();
+    vi.mocked(connect).mockReturnValue(socket.socket);
+
+    const connectPromise = (proxy as any).ensureServerConnection();
+    socket.opened.resolve({} as SocketInfo);
+    await Promise.resolve();
+    socket.pushMessage(":irc.example.com 001 apricot :Welcome");
+    await connectPromise;
+
+    (proxy as any).lastServerActivityAt = Date.now() - 100;
+    await (proxy as any).alarm();
+
+    expect(socket.writes.at(-1)).toContain("PING apricot:");
+
+    await vi.advanceTimersByTimeAsync(25);
+    await (proxy as any).alarm();
+
+    expect(socket.close).toHaveBeenCalled();
+    expect((proxy as any).reconnectAttempt).toBe(1);
+    expect(state.storage.lastAlarmAt).toBe(Date.now() + 5000);
+  });
+
+  it("ignores stale close callbacks from older connection generations", async () => {
+    const state = new FakeState();
+    const proxy = new IrcProxyDO(
+      state as unknown as DurableObjectState,
+      makeEnv(),
+    );
+    await state.initPromise;
+
+    const sentinelConn = { connected: true };
+    (proxy as any).connectionGeneration = 2;
+    (proxy as any).serverConn = sentinelConn;
+
+    await (proxy as any).handleServerClose(1);
+
+    expect((proxy as any).serverConn).toBe(sentinelConn);
+    expect(state.storage.deleteAlarmCalls).toBe(0);
   });
 });
