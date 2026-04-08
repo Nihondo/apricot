@@ -40,7 +40,7 @@ export default {
     if (path === "/" || path === "/health") {
       return Response.json({
         name: "apricot-irc-proxy",
-        version: "0.9.0",
+        version: "0.9.1",
         status: "ok",
       });
     }
