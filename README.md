@@ -2,38 +2,38 @@
 
 ![](./images/apricot_logo.png)
 
-IRC サーバーへの永続接続を維持し、**ブラウザ・IRC クライアント・REST API**の 3 経路からチャットに参加できる IRC プロキシです。
-Cloudflare Workers + Durable Objects で動作します。
+An IRC proxy that keeps a persistent connection to an IRC server and lets you join chat through **three paths: browser, IRC client, and REST API**.
+It runs on Cloudflare Workers + Durable Objects.
 
-長らくお世話になっていた Perl 製 IRC プロキシ「plum」を Cloudflare Workers で動かしてくれ、と Claude Code に頼んだらこれになりました。
+I had been relying on the Perl IRC proxy "plum" for a long time, then asked Claude Code to make it run on Cloudflare Workers, and this is what came out.
 
 ---
-## できること
-- IRC サーバーへの永続接続（切断時も自動再接続）
-- ブラウザでのチャットインターフェース（テーマカスタマイズ・キーワードハイライト対応）
-- WebSocket 対応 IRC クライアントからの接続
-- REST API 経由での操作（チャンネル参加・メッセージ投稿・nick 変更）
-- URL 投稿時のページタイトル自動取得（Twitter/X・YouTube oEmbed 対応）
-- Web UI の URL 画像 / カード / 埋め込みプレビュー（常時表示または hover / 長押し）
+## What It Can Do
+- Keep a persistent IRC connection alive, with automatic reconnect after disconnects
+- Browser-based chat interface with theme customization and keyword highlighting
+- Connect from WebSocket-capable IRC clients
+- Control via REST API, including joining channels, posting messages, and changing nick
+- Automatically fetch page titles when URLs are posted, with Twitter/X and YouTube oEmbed support
+- Web UI URL image, card, and embed previews, shown either always or on hover / long press
 ![](./images/apricot_youtube.png)
 ![](./images/apricot_x.png)
 
 ---
 
-### クイックスタート（初回セットアップ）
+## Quick Start (Initial Setup)
 
-[getting-started.md](getting-started.md) に基本的なセットアップと利用方法をまとめています。
+[getting-started.md](getting-started.md) summarizes the basic setup and usage flow.
 
-### 1. 依存パッケージのインストール
+### 1. Install Dependencies
 
 ```bash
 cd workers
 npm install
 ```
 
-### 2. IRC サーバーの設定
+### 2. Configure the IRC Server
 
-`workers/wrangler.toml` の `[vars]` セクションに接続先を記述します:
+Describe the target server in the `[vars]` section of `workers/wrangler.toml`:
 
 ```toml
 [vars]
@@ -53,14 +53,14 @@ IRC_RECONNECT_JITTER_RATIO = "0.2"
 IRC_IDLE_PING_INTERVAL_MS = "240000"
 IRC_PING_TIMEOUT_MS = "90000"
 IRC_AUTOJOIN = "#general,#test"
-IRC_ENCODING = "iso-2022-jp"   # 日本語サーバーの場合
-TIMEZONE_OFFSET = "9"           # JST (UTC+9)
+IRC_ENCODING = "iso-2022-jp"   # For Japanese IRC servers
+TIMEZONE_OFFSET = "9"          # JST (UTC+9)
 ENABLE_REMOTE_URL_PREVIEW = "false"
 ```
 
-> **補足**: `IRC_NICK` と `IRC_AUTOJOIN` は全プロキシ ID 共通のデフォルト値です。nick は初回アクセス時にプロキシ ID から自動設定されるため、1 人 1 プロキシ ID で使う場合は `IRC_NICK` の設定は不要です。プロキシ ID ごとに nick や autojoin を変えたい場合は `PUT /api/config` を使います。
+> **Note**: `IRC_NICK` and `IRC_AUTOJOIN` are shared defaults for all proxy IDs. Because nick is automatically derived from the proxy ID on first access, you do not need to set `IRC_NICK` if each person uses one proxy ID. If you want different nick or autojoin values per proxy ID, use `PUT /api/config`.
 
-API キーなど秘密情報は `.dev.vars`（ローカル開発用）に記述します（`.gitignore` 済み）:
+Put secrets such as API keys in `.dev.vars` for local development (`.gitignore` already covers it):
 
 ```ini
 API_KEY=your-local-api-key
@@ -70,36 +70,35 @@ CLOUDFLARE_ACCOUNT_ID=your-cloudflare-account-id
 CLOUDFLARE_BROWSER_RENDERING_API_TOKEN=optional-browser-rendering-token
 ```
 
-`CLIENT_PASSWORD` は Web UI と WebSocket 接続の必須パスワードです。
-未設定の場合、`/web/*` と `/ws` は `503` を返します。
-`CLOUDFLARE_ACCOUNT_ID` と `CLOUDFLARE_BROWSER_RENDERING_API_TOKEN` を両方設定すると、`POST /api/post` で `url` を指定したときに Cloudflare Browser Rendering API を使ってレンダリング後のタイトル取得を優先します。未設定時や取得失敗時は、静的 HTML の `<title>` 抽出へフォールバックします。
+`CLIENT_PASSWORD` is required for both the Web UI and WebSocket connections.
+If it is unset, `/web/*` and `/ws` return `503`.
+If both `CLOUDFLARE_ACCOUNT_ID` and `CLOUDFLARE_BROWSER_RENDERING_API_TOKEN` are set, `POST /api/post` prefers a rendered-page title fetched through the Cloudflare Browser Rendering API when `url` is specified. If those values are missing, or the fetch fails, it falls back to extracting the static HTML `<title>`.
 
-### 3. ローカルで起動する
+### 3. Start Locally
 
 ```bash
 npm run dev
 ```
 
-`http://localhost:8787` で起動します。Durable Objects もローカルでエミュレートされます。
+It starts at `http://localhost:8787`, and Durable Objects are emulated locally as well.
 
-> **注意**: `cloudflare:sockets` による TCP 接続はローカル環境でも動作しますが、
-> 接続先 IRC サーバーが `localhost` からのアクセスを許可している必要があります。
+> **Note**: TCP connections through `cloudflare:sockets` also work in local development, but the target IRC server must allow access from `localhost`.
 
-### 4. IRC サーバーへ接続する
+### 4. Connect to the IRC Server
 
 ```bash
 curl -X POST http://localhost:8787/proxy/myproxy/api/connect \
   -H "Authorization: Bearer your-api-key"
 ```
 
-接続は非同期で開始されます。状態を確認するには:
+The connection starts asynchronously. To check the status:
 
 ```bash
 curl http://localhost:8787/proxy/myproxy/api/status \
   -H "Authorization: Bearer your-api-key"
 ```
 
-レスポンス例:
+Example response:
 
 ```json
 {
@@ -111,91 +110,90 @@ curl http://localhost:8787/proxy/myproxy/api/status \
 }
 ```
 
-### 複数ユーザで使うには
+## Using It with Multiple Users
 
-1 つの Workers デプロイを複数人で共有できます。
+One Workers deployment can be shared by multiple people.
 
-apricot は **プロキシ ID** という識別子で IRC セッションを管理します。URL の `/proxy/<ID>/` の部分がプロキシ ID です。
-
+apricot manages IRC sessions by an identifier called a **proxy ID**. The `/proxy/<ID>/` part of the URL is the proxy ID.
 
 ```
-Alice → https://.../proxy/alice/web/   ← "alice" がプロキシ ID
-Bob   → https://.../proxy/bob/web/     ← "bob" がプロキシ ID
+Alice → https://.../proxy/alice/web/   ← "alice" is the proxy ID
+Bob   → https://.../proxy/bob/web/     ← "bob" is the proxy ID
 ```
 
-各プロキシ ID は独立した環境を持ちます:
+Each proxy ID has its own isolated environment:
 
-- IRC 接続（nick は初回アクセス時にプロキシ ID から自動設定）
-- チャンネル状態・メッセージログ
-- Web UI の表示設定
+- IRC connection, with nick automatically derived from the proxy ID on first access
+- Channel state and message logs
+- Web UI display settings
 
-初回アクセス時、プロキシ ID が IRC のニックネームとして自動設定されます（例: プロキシ ID が `alice` なら nick は `alice`）。
+On first access, the proxy ID is automatically used as the IRC nickname. For example, if the proxy ID is `alice`, the nick becomes `alice`.
 
-**注意**: `CLIENT_PASSWORD` はデプロイ全体で 1 つだけ設定できます。プロキシ ID ごとにパスワードを分けることはできないため、全ユーザーが同じパスワードを共有します。また、IRC サーバーの接続設定（`IRC_HOST` 等）も全プロキシ ID で共通です。
+**Caution**: `CLIENT_PASSWORD` can only be configured once for the whole deployment. You cannot assign different passwords per proxy ID, so all users share the same password. IRC server connection settings such as `IRC_HOST` are also shared across all proxy IDs.
 
-### 利用シーン別ガイド
+## Usage Guides by Scenario
 
-### ブラウザ（Web UI）から利用する
+### Use It from a Browser (Web UI)
 
-ブラウザで以下の URL を開きます（ローカル開発時）:
+Open the following URL in your browser when running locally:
 
 ```
 http://localhost:8787/proxy/myproxy/web/
 ```
 
-> **注意**: Web UI を使うには `CLIENT_PASSWORD` の設定が必須です。未設定時は `503` を返します。
+> **Note**: `CLIENT_PASSWORD` is required to use the Web UI. If it is unset, the endpoint returns `503`.
 
-**チャンネル一覧画面**から参加中のチャンネルを選択すると、チャンネル画面に遷移します。
+Select one of the joined channels from the **channel list page** to move to the channel view.
 
-チャンネル画面では:
-- メッセージの送受信
-- URL の自動リンク化
-- 更新があった時の自動反映
-- 接続が不安定な場合の自動再同期
+Inside the channel view you can:
+- Send and receive messages
+- Get automatic linkification for URLs
+- See updates reflected automatically
+- Recover with automatic resync if the connection becomes unstable
 
-チャンネル一覧画面では:
-- チャンネルへの参加・離脱
-- ニックネームの変更
-- 接続デフォルト設定の保存（nick / autojoin）
-- 設定画面へのアクセス（パスワード設定時のみ）
+On the channel list page you can:
+- Join or leave channels
+- Change your nickname
+- Save default connection settings such as `nick` and `autojoin`
+- Open the settings screen, if password-based access is enabled
 
 ![](./images/apricot_chlist.png)
 
-#### Web UI の表示カスタマイズ
+#### Web UI Display Customization
 
-設定画面（`/proxy/:id/web/settings`）から以下を変更できます:
+From the settings page (`/proxy/:id/web/settings`), you can change:
 
-- **フォント・文字サイズ** — チャンネル画面のフォントファミリーとサイズ
-- **配色テーマ** — 13 色のカラーピッカーによるテーマ設定。ライト／ダークのプリセットあり
-- **表示順** — 古い順（asc）/ 新しい順（desc）の切り替え
-- **URL プレビュー** — URL の画像 / カード / 埋め込みプレビューを常時表示するか（OFF の場合は hover / 長押しで表示）
-- **強調したいキーワード** — 指定語をハイライト表示
-- **控えめ表示キーワード** — 指定語を含むメッセージを薄く表示
-- **追加 CSS** — チャンネル画面専用の限定 CSS
+- **Font and text size**: font family and size for the channel view
+- **Color theme**: theme settings through 13 color pickers, with light and dark presets
+- **Display order**: toggle between ascending (`asc`) and descending (`desc`)
+- **URL previews**: choose whether image / card / embed previews are always visible, or shown only on hover / long press when disabled
+- **Keywords to highlight**: visually emphasize matching words
+- **Muted keywords**: dim messages that contain specific words
+- **Additional CSS**: restricted CSS applied only to the channel view
 
 ![](./images/apricot_setting.png)
 
-設定内容はプロキシ ID ごとに保存され、チャンネル画面にのみ適用されます。追加 CSS は `<style>` へ直接埋め込まず、`/proxy/:id/web/theme.css` から別スタイルシートとして配信されます。
-許可されるのは `.channel-shell` などの既定セレクタ配下と、色・余白・フォント・枠線などの見た目変更用プロパティだけです。`@import`、`url()`、`content:`、`html` / `body` / `iframe` / `*` を含むセレクタは拒否されます。
+These settings are saved per proxy ID and apply only to the channel view. Additional CSS is not inlined directly into a `<style>` tag. Instead, it is served as a separate stylesheet from `/proxy/:id/web/theme.css`.
+Only styles under predefined selectors such as `.channel-shell` are allowed, and only visual properties such as colors, spacing, fonts, and borders are accepted. Selectors containing `@import`, `url()`, `content:`, `html`, `body`, `iframe`, or `*` are rejected.
 
-> **補足**: 設定画面も `CLIENT_PASSWORD` 設定時のみ利用できます。
-> **補足**: チャンネル一覧画面（`/proxy/:id/web/`）では、`PUT /api/config` 相当の接続デフォルト設定として `nick` と `autojoin` も保存できます。こちらも現在の接続には即時反映されません。
+> **Note**: The settings page is available only when `CLIENT_PASSWORD` is configured.
+> **Note**: The channel list page (`/proxy/:id/web/`) can also save `nick` and `autojoin` as default connection settings equivalent to `PUT /api/config`. These saved values are not applied to the current connection immediately.
 
 ---
 
-### IRC クライアントから利用する
+### Use It from an IRC Client
 
-WebSocket 経由で標準 IRC クライアント（WeeChat、irssi 等）から接続できます。
+You can connect through WebSocket from standard IRC clients such as WeeChat or irssi.
 
-> **注意**: WebSocket 接続にも `CLIENT_PASSWORD` の設定が必須です。未設定時は `503` を返します。
+> **Note**: `CLIENT_PASSWORD` is also required for WebSocket connections. If it is unset, the endpoint returns `503`.
 
-接続先:
+Target endpoint:
 
 ```
 ws://localhost:8787/proxy/myproxy/ws
 ```
 
-クライアント側の設定例（WeeChat の場合）:
+Client-side example configuration for WeeChat:
 
 ```
 /server add apricot localhost/8787 -ssl=false
@@ -204,16 +202,16 @@ ws://localhost:8787/proxy/myproxy/ws
 /connect apricot
 ```
 
-接続後はプロキシが既に参加しているチャンネルに自動的に同期（JOIN・TOPIC・NAMES を再送）されます。
+After connecting, the proxy automatically syncs channels it has already joined by replaying `JOIN`, `TOPIC`, and `NAMES`.
 
 ---
 
-### 外部スクリプト・API から利用する
+### Use It from External Scripts or APIs
 
-プログラムから IRC チャンネルを操作する REST API です。
-`Authorization: Bearer <API_KEY>` ヘッダーによる認証が必要です。
+This is the REST API for operating IRC channels programmatically.
+Authentication requires the `Authorization: Bearer <API_KEY>` header.
 
-#### チャンネルに参加する
+#### Join a Channel
 
 ```bash
 curl -X POST http://localhost:8787/proxy/myproxy/api/join \
@@ -222,9 +220,9 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/join \
   -d '{"channel": "#general"}'
 ```
 
-> **ヒント**: 接続時に自動参加させたい場合は、`wrangler.toml` の `IRC_AUTOJOIN` にチャンネルを指定してください。
+> **Tip**: If you want channels to be joined automatically on connect, specify them in `IRC_AUTOJOIN` inside `wrangler.toml`.
 
-#### チャンネルから離脱する
+#### Leave a Channel
 
 ```bash
 curl -X POST http://localhost:8787/proxy/myproxy/api/leave \
@@ -233,7 +231,7 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/leave \
   -d '{"channel": "#general"}'
 ```
 
-#### メッセージを投稿する
+#### Post a Message
 
 ```bash
 curl -X POST http://localhost:8787/proxy/myproxy/api/post \
@@ -242,21 +240,21 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/post \
   -d '{"channel": "#general", "message": "Hello from API!"}'
 ```
 
-#### Chrome 拡張から現在ページを投稿する
+#### Post the Current Page from a Chrome Extension
 
-`ChromeExtension/` 配下に、現在開いているページのタイトルと URL を `message` として送る Chrome 拡張のサンプルを含めています。`url` モードは使わず、拡張側で `タイトル URL >選択テキスト 追加メッセージ` を組み立てて `POST /proxy/:id/api/post` へ送信します。
+Under `ChromeExtension/`, the repository includes a sample Chrome extension that posts the title and URL of the currently open page as a `message`. It does not use `url` mode. Instead, the extension builds a payload like `Title URL >selected text extra message` on the extension side and sends it to `POST /proxy/:id/api/post`.
 
 ![](./images/apricot_chrome.png)
 
-1. Chrome の `chrome://extensions/` を開く
-2. 「デベロッパー モード」を有効にする
-3. 「パッケージ化されていない拡張機能を読み込む」から [ChromeExtension](/Users/nihondo/Library/CloudStorage/Dropbox/Projects.localized/apricot/ChromeExtension) を選ぶ
-4. Popup で `apricot URL`、`Proxy ID`、`Channel`、`API Key` を設定する
-5. 投稿先ページを開いた状態で拡張を開き、「投稿」を押す
+1. Open Chrome at `chrome://extensions/`
+2. Enable Developer Mode
+3. Click "Load unpacked" and select [ChromeExtension](ChromeExtension)
+4. In the popup, configure `apricot URL`, `Proxy ID`, `Channel`, and `API Key`
+5. Open the page you want to post, open the extension, and click "Post"
 
-#### URL のメタデータを取得して投稿する
+#### Post a URL with Retrieved Metadata
 
-`message` の代わりに `url` を指定すると、ページタイトルを取得して投稿します。Web UI では、同じ URL から画像 / カードプレビューも保存されます:
+If you specify `url` instead of `message`, apricot retrieves the page title and posts it. In the Web UI, image or card previews from the same URL are also stored:
 
 ```bash
 curl -X POST http://localhost:8787/proxy/myproxy/api/post \
@@ -265,28 +263,28 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/post \
   -d '{"channel": "#general", "url": "https://example.com/article"}'
 ```
 
-- **YouTube URL**: Web UI では iframe 埋め込みプレビューを保存。通常動画は高さ `200`、Shorts は高さ `631` で表示
-- **Twitter/X URL**: oEmbed API で投稿本文と著者名を取得し、Web UI ではテキストカードまたは rich embed としてプレビュー
-- **一般 URL**: Cloudflare Browser Rendering のシークレットが設定されていればレンダリング後の `<title>` を優先取得。未設定または取得失敗時は HTML の `<title>` タグを取得
-- **フォールバック**: メタデータを取れない場合は URL をそのまま投稿
+- **YouTube URLs**: the Web UI stores an iframe embed preview. Standard videos use height `200`, while Shorts use height `631`
+- **Twitter/X URLs**: the oEmbed API retrieves the post text and author name, and the Web UI stores either a text card or a rich embed preview
+- **General URLs**: if Cloudflare Browser Rendering secrets are configured, apricot prefers the rendered-page `<title>`. Otherwise, or if retrieval fails, it falls back to the HTML `<title>` tag
+- **Fallback**: if metadata cannot be retrieved, the raw URL is posted as-is
 
-URL の自動プレビュー解決は、既定では無効です。必要な場合だけ `ENABLE_REMOTE_URL_PREVIEW=true` を設定してください。
-この設定は外部 fetch の濫用を抑えるためのグローバルスイッチで、有効にすると次の経路すべてに適用されます。
+Automatic URL preview resolution is disabled by default. Set `ENABLE_REMOTE_URL_PREVIEW=true` only when you need it.
+This setting is a global switch to prevent excessive external fetch usage, and it applies to all of the following:
 
-- 他人からの受信メッセージ（`ss_privmsg` / `ss_notice`）
-- Web composer や `POST /api/post` の `message` 指定による自分の投稿
+- Incoming messages from other people (`ss_privmsg` / `ss_notice`)
+- Your own messages posted through the Web composer or `POST /api/post` with `message`
 
-なお `POST /api/post` の `url` 指定による投稿は本フラグに依らず常にメタデータ取得を行います。
+Posts made through `POST /api/post` with `url` always perform metadata retrieval regardless of this flag.
 
-リクエストボディ:
+Request body:
 
-| フィールド | 必須 | 説明 |
-|------------|:----:|------|
-| `channel` | ✅ | 投稿先チャンネル（例: `#general`） |
-| `message` | △ | 投稿テキスト（`url` と排他） |
-| `url` | △ | メタデータ取得元 URL（`message` と排他） |
+| Field | Required | Description |
+|-------|:--------:|-------------|
+| `channel` | ✅ | Destination channel, for example `#general` |
+| `message` | △ | Message text, mutually exclusive with `url` |
+| `url` | △ | URL used to retrieve metadata, mutually exclusive with `message` |
 
-#### nick を変更する
+#### Change nick
 
 ```bash
 curl -X POST http://localhost:8787/proxy/myproxy/api/nick \
@@ -295,11 +293,11 @@ curl -X POST http://localhost:8787/proxy/myproxy/api/nick \
   -d '{"nick": "apricot_alt"}'
 ```
 
-> **補足**: サーバーの応答を待ってからレスポンスを返します。nick が使用中の場合は `433 ERR_NICKNAMEINUSE` 等のエラーメッセージが返ります。5 秒以内にサーバーが応答しない場合は `503` を返します。
+> **Note**: The response waits for the IRC server's reply. If the nick is already in use, an error such as `433 ERR_NICKNAMEINUSE` is returned. If the server does not respond within 5 seconds, the endpoint returns `503`.
 
-#### プロキシ ID ごとの nick / autojoin を設定する
+#### Configure nick / autojoin per Proxy ID
 
-初回アクセス時に自動設定された nick や autojoin をプロキシ ID ごとに変えたい場合は `PUT /api/config` を使います:
+If you want to override the automatically assigned nick or autojoin per proxy ID, use `PUT /api/config`:
 
 ```bash
 curl -X PUT http://localhost:8787/proxy/myproxy/api/config \
@@ -308,29 +306,29 @@ curl -X PUT http://localhost:8787/proxy/myproxy/api/config \
   -d '{"nick": "myproxy_alt", "autojoin": ["#general", "#random"]}'
 ```
 
-ここで設定した値は**次回接続時のデフォルト**として保存されます。現在接続中の nick を即時変更したい場合は `POST /api/nick` を使ってください。`nick: null` または `autojoin: []` を送ると、その項目の保存値をクリアして共有デフォルトへ戻せます。
+The values saved here become the **defaults for the next connection**. If you want to change the current nick immediately, use `POST /api/nick`. Sending `nick: null` or `autojoin: []` clears the saved override and returns that item to the shared default.
 
-同じ内容は Web UI のチャンネル一覧画面（`/proxy/:id/web/`）からも保存できます。Web UI では `autojoin` を 1 行 1 チャンネルで入力し、空欄で保存すると保存値をクリアします。
+The same settings can also be saved from the Web UI channel list page (`/proxy/:id/web/`). In the Web UI, enter `autojoin` one channel per line. Saving an empty field clears the stored value.
 
-#### IRC サーバーから切断する
+#### Disconnect from the IRC Server
 
 ```bash
 curl -X POST http://localhost:8787/proxy/myproxy/api/disconnect \
   -H "Authorization: Bearer your-api-key"
 ```
 
-> **補足**: API での手動切断は `IRC_AUTO_RECONNECT_ON_DISCONNECT=true` でも自動再接続を行いません。
+> **Note**: A manual disconnect through the API does not auto-reconnect even if `IRC_AUTO_RECONNECT_ON_DISCONNECT=true`.
 
-#### チャンネルのログを取得する
+#### Fetch Channel Logs
 
 ```bash
 curl http://localhost:8787/proxy/myproxy/api/logs/%23general \
   -H "Authorization: Bearer your-api-key"
 ```
 
-チャンネル名の `#` は `%23` にエンコードしてください。
+Encode the `#` in the channel name as `%23`.
 
-レスポンス例:
+Example response:
 
 ```json
 {
@@ -342,47 +340,47 @@ curl http://localhost:8787/proxy/myproxy/api/logs/%23general \
 }
 ```
 
-`messages` の各オブジェクト:
+Each object in `messages`:
 
-| フィールド | 型 | 説明 |
-|------------|-----|------|
-| `sequence` | number | チャンネル内で単調増加するログシーケンス |
-| `time` | number | Unix ミリ秒 |
+| Field | Type | Description |
+|-------|------|-------------|
+| `sequence` | number | Monotonically increasing log sequence within the channel |
+| `time` | number | Unix time in milliseconds |
 | `type` | string | `privmsg` / `notice` / `join` / `part` / `quit` / `kick` / `nick` / `topic` / `mode` / `self` |
-| `nick` | string | 発言者 nick |
-| `text` | string | メッセージ本文（`nick` / `topic` 等では対象または新しい値） |
-| `embed` | object? | Web UI 用の URL プレビュー情報。`kind`, `sourceUrl`, `imageUrl?`, `title?`, `siteName?`, `description?`, `html?` を含む |
+| `nick` | string | Speaker nick |
+| `text` | string | Message text, or the target / new value for events such as `nick` and `topic` |
+| `embed` | object? | URL preview data for the Web UI, including `kind`, `sourceUrl`, `imageUrl?`, `title?`, `siteName?`, `description?`, and `html?` |
 
-最大 `WEB_LOG_MAX_LINES` 件（既定 200 件、時系列順）を返します。指定チャンネルのバッファが存在しない場合は `404` を返します。
-この API は最新バッファの取得用であり、長期保存用の完全なアーカイブ API ではありません。流量が高いチャンネルでは、ポーリング間隔より先に古いログが押し出される場合があります。
+It returns up to `WEB_LOG_MAX_LINES` entries, default `200`, in chronological order. If no buffer exists for the specified channel, the endpoint returns `404`.
+This API is meant to retrieve the latest buffer, not to provide a complete long-term archive. In high-traffic channels, older logs may be pushed out before your next poll.
 
-Web UI 設定画面では、URL プレビューを本文下に常時表示するかを切り替えられます。OFF の場合でも、対応する URL リンクでは PC の hover / focus とタッチ端末の長押し相当でプレビューできます。
+The Web UI settings page lets you choose whether URL previews are always shown below the message body. Even when that option is off, previews are still available from matching URL links through hover / focus on desktop and long-press equivalents on touch devices.
 
-### Cloudflare へのデプロイ
+## Deploying to Cloudflare
 
-### 1. Wrangler にログインする
+### 1. Log In to Wrangler
 
 ```bash
 npx wrangler login
 ```
 
-### 2. Secrets を設定する
+### 2. Set Secrets
 
-秘密情報は Wrangler のシークレット機能で設定します:
+Configure sensitive values through Wrangler secrets:
 
 ```bash
 npx wrangler secret put API_KEY
-npx wrangler secret put IRC_PASSWORD        # 必要な場合のみ
-npx wrangler secret put CLIENT_PASSWORD      # 必要な場合のみ
+npx wrangler secret put IRC_PASSWORD        # Only if needed
+npx wrangler secret put CLIENT_PASSWORD      # Only if needed
 ```
 
-### 3. デプロイする
+### 3. Deploy
 
 ```bash
 npm run deploy
 ```
 
-### デプロイ後の URL
+### URL After Deployment
 
 ```
 https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
@@ -390,176 +388,176 @@ https://apricot.<your-subdomain>.workers.dev/proxy/myproxy/web/
 
 ---
 
-## 技術情報
+## Technical Information
 
-この章は運用・拡張・デバッグのための技術資料です。利用手順ではなく、内部仕様と設計の把握を目的にしています。
+This chapter is technical documentation for operation, extension, and debugging. It is intended to explain internal behavior and design rather than usage steps.
 
-### 環境変数一覧
+### Environment Variables
 
-| 環境変数 | 必須 | デフォルト | 説明 |
-|----------|:----:|-----------|------|
-| `IRC_HOST` | ✅ | ─ | IRC サーバーホスト名 |
-| `IRC_PORT` | ─ | `6667` | IRC サーバーポート（レンジ・複数指定可、例: `6660-6669` や `6660,6667,6697`） |
-| `IRC_NICK` | ─ | `apricot` | IRC ニックネームのフォールバック値。実際の nick は初回アクセス時にプロキシ ID から自動設定される |
-| `IRC_USER` | ─ | `apricot` | IRC ユーザー名 |
-| `IRC_REALNAME` | ─ | `apricot IRC Proxy` | IRC リアルネーム |
-| `IRC_TLS` | ─ | `false` | IRC サーバーへの TCP 接続に TLS を使用（`true` / `false`） |
-| `IRC_PASSWORD` | ─ | ─ | IRC サーバーパスワード（secret 推奨） |
-| `CLIENT_PASSWORD` | ─ | ─ | WebSocket クライアント接続と Web UI ログインの共通パスワード。未設定時は `/web/*` と `/ws` が `503` を返す |
-| `IRC_AUTO_CONNECT_ON_STARTUP` | ─ | `false` | Durable Object インスタンス起動時に IRC へ接続開始。初回リクエストは接続完了を待たず、そのまま返る |
-| `IRC_AUTO_RECONNECT_ON_DISCONNECT` | ─ | `false` | IRC 切断時に自動再接続を有効化（API 手動切断時は抑制） |
-| `IRC_CONNECT_TIMEOUT_MS` | ─ | `10000` | TCP ソケット確立待ちのタイムアウト（ミリ秒） |
-| `IRC_REGISTRATION_TIMEOUT_MS` | ─ | `120000` | `001` welcome を待つ登録タイムアウト。登録前メッセージを受信している間は延長される無通信タイムアウト（ミリ秒） |
-| `IRC_RECONNECT_BASE_DELAY_MS` | ─ | `5000` | 自動再接続バックオフの初期待機時間（ミリ秒） |
-| `IRC_RECONNECT_MAX_DELAY_MS` | ─ | `60000` | 自動再接続バックオフの最大待機時間（ミリ秒） |
-| `IRC_RECONNECT_JITTER_RATIO` | ─ | `0.2` | 自動再接続待機時間に加えるジッター比率 |
-| `IRC_IDLE_PING_INTERVAL_MS` | ─ | `240000` | サーバーからの受信が止まった際に能動 `PING` を送るまでのアイドル時間（ミリ秒） |
-| `IRC_PING_TIMEOUT_MS` | ─ | `90000` | 能動 `PING` 送信後に `PONG` または他の受信を待つ時間（ミリ秒） |
-| `IRC_AUTOJOIN` | ─ | ─ | 自動参加チャンネルのデフォルト値（カンマ区切り、例: `#general,#test`）。プロキシ ID ごとに `PUT /api/config` で上書き可能 |
-| `IRC_ENCODING` | ─ | `utf-8` | IRC サーバーの文字コード（例: `iso-2022-jp`、`euc-jp`、`shift_jis`） |
-| `ENABLE_REMOTE_URL_PREVIEW` | ─ | `false` | URL の自動プレビュー解決を有効化する総合スイッチ。受信メッセージ・自分の投稿（Web composer / API message）に適用。`POST /api/post` の `url` 指定は常に有効 |
-| `KEEPALIVE_INTERVAL` | ─ | `60` | DO keepalive 間隔（秒） |
-| `TIMEZONE_OFFSET` | ─ | `9` | Web UI の時刻表示オフセット（時間単位、例: JST は `9`） |
-| `WEB_LOG_MAX_LINES` | ─ | `200` | チャンネルごとのログ保持件数 |
-| `API_KEY` | ✅ | ─ | 外部 API 認証キー（secret 必須） |
+| Environment Variable | Required | Default | Description |
+|----------------------|:--------:|---------|-------------|
+| `IRC_HOST` | ✅ | ─ | IRC server hostname |
+| `IRC_PORT` | ─ | `6667` | IRC server port. Ranges and multiple values are supported, for example `6660-6669` or `6660,6667,6697` |
+| `IRC_NICK` | ─ | `apricot` | Fallback IRC nickname. In practice, nick is automatically derived from the proxy ID on first access |
+| `IRC_USER` | ─ | `apricot` | IRC username |
+| `IRC_REALNAME` | ─ | `apricot IRC Proxy` | IRC real name |
+| `IRC_TLS` | ─ | `false` | Use TLS for the TCP connection to the IRC server, `true` or `false` |
+| `IRC_PASSWORD` | ─ | ─ | IRC server password, storing it as a secret is recommended |
+| `CLIENT_PASSWORD` | ─ | ─ | Shared password for WebSocket client connections and Web UI login. If unset, `/web/*` and `/ws` return `503` |
+| `IRC_AUTO_CONNECT_ON_STARTUP` | ─ | `false` | Start connecting to IRC when the Durable Object instance starts. The first request returns immediately without waiting for connection completion |
+| `IRC_AUTO_RECONNECT_ON_DISCONNECT` | ─ | `false` | Enable automatic reconnect after an IRC disconnect, except for manual API disconnects |
+| `IRC_CONNECT_TIMEOUT_MS` | ─ | `10000` | Timeout while waiting for TCP socket establishment, in milliseconds |
+| `IRC_REGISTRATION_TIMEOUT_MS` | ─ | `120000` | Registration timeout while waiting for IRC `001` welcome. This is an idle timeout extended while registration-phase messages keep arriving, in milliseconds |
+| `IRC_RECONNECT_BASE_DELAY_MS` | ─ | `5000` | Initial wait time for reconnect backoff, in milliseconds |
+| `IRC_RECONNECT_MAX_DELAY_MS` | ─ | `60000` | Maximum wait time for reconnect backoff, in milliseconds |
+| `IRC_RECONNECT_JITTER_RATIO` | ─ | `0.2` | Jitter ratio added to reconnect delays |
+| `IRC_IDLE_PING_INTERVAL_MS` | ─ | `240000` | Idle time before sending an active `PING` when the server stops sending traffic, in milliseconds |
+| `IRC_PING_TIMEOUT_MS` | ─ | `90000` | Time to wait for `PONG` or any other inbound message after sending an active `PING`, in milliseconds |
+| `IRC_AUTOJOIN` | ─ | ─ | Default auto-join channels as a comma-separated list, for example `#general,#test`. Can be overridden per proxy ID with `PUT /api/config` |
+| `IRC_ENCODING` | ─ | `utf-8` | Character encoding used by the IRC server, for example `iso-2022-jp`, `euc-jp`, or `shift_jis` |
+| `ENABLE_REMOTE_URL_PREVIEW` | ─ | `false` | Global switch that enables automatic URL preview resolution. Applies to incoming messages and your own posts from the Web composer or API `message`. `POST /api/post` with `url` is always enabled |
+| `KEEPALIVE_INTERVAL` | ─ | `60` | DO keepalive interval in seconds |
+| `TIMEZONE_OFFSET` | ─ | `9` | Time display offset for the Web UI, in hours. For example, JST is `9` |
+| `WEB_LOG_MAX_LINES` | ─ | `200` | Maximum number of retained log lines per channel |
+| `API_KEY` | ✅ | ─ | Authentication key for the external API, must be provided as a secret |
 
-> **補足**: `IRC_AUTO_CONNECT_ON_STARTUP` の「起動時」は、Cloudflare Workers 全体の起動ではなく、各プロキシ ID の Durable Object インスタンスが最初のリクエストや WebSocket 接続で起動したタイミングを指します。接続処理はバックグラウンドで始まり、`/api/status` や Web UI の初回応答はブロックしません。
+> **Note**: In `IRC_AUTO_CONNECT_ON_STARTUP`, "startup" does not mean Cloudflare Workers process startup. It means the moment each proxy ID's Durable Object instance starts in response to its first request or WebSocket connection. The actual connection process begins in the background, so `/api/status` and the initial Web UI response are not blocked.
 
-### プロキシ ID について
+### About Proxy IDs
 
-プロキシは **プロキシ ID** 単位で独立した Durable Object インスタンスを持ちます。
-任意の文字列をプロキシ ID として使用できます（例: `myproxy`、`main`）。
-全インスタンスが同じ環境変数設定を共有しますが、IRC 接続やチャンネル状態は独立しています。
+The proxy creates an independent Durable Object instance for each **proxy ID**.
+Any string can be used as a proxy ID, for example `myproxy` or `main`.
+All instances share the same environment-variable configuration, but each IRC connection and channel state is isolated.
 
-nick の決定順序（高い方が優先）:
-1. `PUT /api/config` で保存したプロキシ ID ごとの nick
-2. 初回アクセス時にプロキシ ID から自動生成した nick（例: `alice` → nick `alice`）
-3. `wrangler.toml` の `IRC_NICK`
+Nick resolution order, highest priority first:
+1. The per-proxy-ID nick saved through `PUT /api/config`
+2. The nick automatically generated from the proxy ID on first access, for example `alice` becomes nick `alice`
+3. `IRC_NICK` in `wrangler.toml`
 
-### API エンドポイント一覧
+### API Endpoints
 
-| メソッド | パス | 認証 | 説明 |
-|----------|------|:----:|------|
-| `GET` | `/` または `/health` | ─ | ヘルスチェック |
-| `GET` | `/proxy/:id/ws` | IRC `PASS` | WebSocket 接続（IRC クライアント用、`CLIENT_PASSWORD` 必須） |
-| `GET` | `/proxy/:id/web/` | Cookie | チャンネル一覧ページ（`CLIENT_PASSWORD` 必須） |
-| `GET` | `/proxy/:id/web/login` | ─ | Web UI ログイン画面（`CLIENT_PASSWORD` 必須） |
-| `POST` | `/proxy/:id/web/login` | ─ | Web UI ログイン（`CLIENT_PASSWORD` 必須） |
-| `POST` | `/proxy/:id/web/logout` | ─ | Web UI ログアウト |
-| `POST` | `/proxy/:id/web/config` | Cookie | Web UI 接続デフォルト設定保存（nick / autojoin） |
-| `GET` | `/proxy/:id/web/settings` | Cookie | Web UI 表示設定ページ |
-| `POST` | `/proxy/:id/web/settings` | Cookie | Web UI 設定保存 |
-| `POST` | `/proxy/:id/web/join` | Cookie | Web UI チャンネル参加 |
-| `POST` | `/proxy/:id/web/leave` | Cookie | Web UI チャンネル離脱 |
-| `POST` | `/proxy/:id/web/nick` | Cookie | Web UI ニックネーム変更 |
-| `GET` | `/proxy/:id/web/theme.css` | Cookie | チャンネル画面専用のカスタム CSS |
-| `GET` | `/proxy/:id/web/:channel` | Cookie | チャンネルシェルページ |
-| `GET` | `/proxy/:id/web/:channel/messages` | Cookie | メッセージ一覧フレーム |
-| `GET` | `/proxy/:id/web/:channel/messages/fragment` | Cookie | メッセージ一覧の HTML 断片（Web UI 内部更新用。通常は `since` 付きで利用） |
-| `GET` | `/proxy/:id/web/:channel/updates` | Cookie | メッセージ更新通知用 WebSocket（Web UI 内部用） |
-| `GET` | `/proxy/:id/web/:channel/composer` | Cookie | 入力フォームフレーム |
-| `POST` | `/proxy/:id/web/:channel/composer` | Cookie | Web フォームからメッセージ送信 |
-| `POST` | `/proxy/:id/api/connect` | Bearer | IRC サーバーへ接続 |
-| `POST` | `/proxy/:id/api/disconnect` | Bearer | IRC サーバー手動切断 |
-| `POST` | `/proxy/:id/api/join` | Bearer | チャンネル参加 |
-| `POST` | `/proxy/:id/api/leave` | Bearer | チャンネル離脱 |
-| `POST` | `/proxy/:id/api/post` | Bearer | 外部投稿 |
-| `POST` | `/proxy/:id/api/nick` | Bearer | nick 即時変更（IRC NICKコマンド送信） |
-| `PUT` | `/proxy/:id/api/config` | Bearer | プロキシ ID ごとの nick / autojoin を保存 |
-| `GET` | `/proxy/:id/api/logs/:channel` | Bearer | チャンネルログ取得 |
-| `GET` | `/proxy/:id/api/status` | Bearer | 接続状態確認 |
-| `OPTIONS` | `/proxy/:id/api/*` | ─ | CORS プリフライト |
+| Method | Path | Auth | Description |
+|--------|------|:----:|-------------|
+| `GET` | `/` or `/health` | ─ | Health check |
+| `GET` | `/proxy/:id/ws` | IRC `PASS` | WebSocket connection for IRC clients, requires `CLIENT_PASSWORD` |
+| `GET` | `/proxy/:id/web/` | Cookie | Channel list page, requires `CLIENT_PASSWORD` |
+| `GET` | `/proxy/:id/web/login` | ─ | Web UI login page, requires `CLIENT_PASSWORD` |
+| `POST` | `/proxy/:id/web/login` | ─ | Web UI login, requires `CLIENT_PASSWORD` |
+| `POST` | `/proxy/:id/web/logout` | ─ | Web UI logout |
+| `POST` | `/proxy/:id/web/config` | Cookie | Save Web UI default connection settings, `nick` / `autojoin` |
+| `GET` | `/proxy/:id/web/settings` | Cookie | Web UI display settings page |
+| `POST` | `/proxy/:id/web/settings` | Cookie | Save Web UI settings |
+| `POST` | `/proxy/:id/web/join` | Cookie | Join a channel from the Web UI |
+| `POST` | `/proxy/:id/web/leave` | Cookie | Leave a channel from the Web UI |
+| `POST` | `/proxy/:id/web/nick` | Cookie | Change nickname from the Web UI |
+| `GET` | `/proxy/:id/web/theme.css` | Cookie | Custom CSS for the channel view |
+| `GET` | `/proxy/:id/web/:channel` | Cookie | Channel shell page |
+| `GET` | `/proxy/:id/web/:channel/messages` | Cookie | Message list frame |
+| `GET` | `/proxy/:id/web/:channel/messages/fragment` | Cookie | HTML fragment for message updates inside the Web UI, usually used with `since` |
+| `GET` | `/proxy/:id/web/:channel/updates` | Cookie | WebSocket for message update notifications used by the Web UI |
+| `GET` | `/proxy/:id/web/:channel/composer` | Cookie | Input form frame |
+| `POST` | `/proxy/:id/web/:channel/composer` | Cookie | Send a message from the Web form |
+| `POST` | `/proxy/:id/api/connect` | Bearer | Connect to the IRC server |
+| `POST` | `/proxy/:id/api/disconnect` | Bearer | Manually disconnect from the IRC server |
+| `POST` | `/proxy/:id/api/join` | Bearer | Join a channel |
+| `POST` | `/proxy/:id/api/leave` | Bearer | Leave a channel |
+| `POST` | `/proxy/:id/api/post` | Bearer | External post |
+| `POST` | `/proxy/:id/api/nick` | Bearer | Change nick immediately by sending IRC `NICK` |
+| `PUT` | `/proxy/:id/api/config` | Bearer | Save `nick` / `autojoin` per proxy ID |
+| `GET` | `/proxy/:id/api/logs/:channel` | Bearer | Fetch channel logs |
+| `GET` | `/proxy/:id/api/status` | Bearer | Check connection status |
+| `OPTIONS` | `/proxy/:id/api/*` | ─ | CORS preflight |
 
-> **補足**: `/api/*` は `OPTIONS` を除いて常に Bearer 認証が必要です。`API_KEY` 未設定時は `503` を返します。
-> **補足**: `/web/*` と `/ws` は `CLIENT_PASSWORD` 未設定時に `503` を返します。
+> **Note**: `/api/*` always requires Bearer authentication except for `OPTIONS`. If `API_KEY` is unset, it returns `503`.
+> **Note**: `/web/*` and `/ws` return `503` if `CLIENT_PASSWORD` is unset.
 
-### Web UI の URL 構造
+### Web UI URL Structure
 
-| URL | 説明 |
-|-----|------|
-| `/proxy/:id/web/` | 参加中チャンネル一覧 |
-| `/proxy/:id/web/login` | ログイン画面 |
-| `/proxy/:id/web/config` | 接続デフォルト設定保存 |
-| `/proxy/:id/web/settings` | 表示設定（チャンネル画面専用） |
-| `/proxy/:id/web/theme.css` | チャンネル画面専用のカスタム CSS |
-| `/proxy/:id/web/:channel` | チャンネルシェル画面（iframe 構成） |
-| `/proxy/:id/web/:channel/messages` | メッセージ一覧フレーム |
-| `/proxy/:id/web/:channel/messages/fragment` | メッセージ一覧の HTML 断片。iframe 内の Fetch 更新で使用 |
-| `/proxy/:id/web/:channel/updates` | メッセージ更新通知を受ける WebSocket |
-| `/proxy/:id/web/:channel/composer` | 入力フォームフレーム |
+| URL | Description |
+|-----|-------------|
+| `/proxy/:id/web/` | List of joined channels |
+| `/proxy/:id/web/login` | Login page |
+| `/proxy/:id/web/config` | Save default connection settings |
+| `/proxy/:id/web/settings` | Display settings for the channel view |
+| `/proxy/:id/web/theme.css` | Custom CSS for the channel view |
+| `/proxy/:id/web/:channel` | Channel shell page using iframes |
+| `/proxy/:id/web/:channel/messages` | Message list frame |
+| `/proxy/:id/web/:channel/messages/fragment` | HTML fragment for the message list, used by in-iframe fetch updates |
+| `/proxy/:id/web/:channel/updates` | WebSocket for message update notifications |
+| `/proxy/:id/web/:channel/composer` | Input form frame |
 
-### Web UI の更新内部ルート
+### Internal Web UI Update Routes
 
-チャンネル画面のメッセージ領域は、以下の Web UI 内部ルートを使って更新されます。
-これらはブラウザ表示用の内部エンドポイントで、外部連携向け API ではありません。
+The message area in the channel view is updated through the following internal Web UI routes.
+These are browser-facing internal endpoints, not an external integration API.
 
-- `GET /proxy/:id/web/:channel/messages/fragment?since=<sequence>` — メッセージ一覧の HTML 断片。`since=0` または継続不能時は全量、それ以外は差分
-- `GET /proxy/:id/web/:channel/updates` — メッセージ更新通知を受ける WebSocket。`channel-updated` では最新 `sequence` を通知
+- `GET /proxy/:id/web/:channel/messages/fragment?since=<sequence>`: returns an HTML fragment of the message list. With `since=0` or when diff continuation is not possible, it returns the full set. Otherwise it returns a delta
+- `GET /proxy/:id/web/:channel/updates`: WebSocket that notifies message updates. On `channel-updated`, it includes the latest `sequence`
 
-通常は `updates` の通知を受けた時だけ `messages/fragment?since=<latestSequence>` を Fetch します。クライアント側で sequence の不整合を検知した場合や、サーバ側で差分継続不能と判断した場合は全量断片へフォールバックします。
+Normally, the client fetches `messages/fragment?since=<latestSequence>` only when `updates` notifies it. If the client detects a sequence mismatch, or the server decides a delta can no longer continue, the UI falls back to fetching the full fragment.
 
-### URL プレビュー解決の優先順位
+### URL Preview Resolution Priority
 
-Web UI の URL プレビューは、概ね次の順で解決します。
+URL previews in the Web UI are resolved roughly in this order:
 
-1. 画像直リンクならそのままインライン画像として扱う
-2. YouTube URL なら動画 ID を抽出し、iframe の rich embed を生成する
-3. Twitter/X URL は oEmbed からテキストカードまたは rich embed を生成する
-4. それ以外は `og:image` → `twitter:image` → JSON oEmbed の順で画像を探す
-5. 画像もテキストカードも生成できなければプレビューは表示しない
+1. If the URL is a direct image link, it is shown inline as an image
+2. If the URL is a YouTube link, the video ID is extracted and a rich iframe embed is generated
+3. If the URL is a Twitter/X link, oEmbed is used to generate either a text card or a rich embed
+4. Otherwise, the resolver looks for an image in the order `og:image` → `twitter:image` → JSON oEmbed
+5. If neither an image nor a text card can be generated, no preview is shown
 
 ---
 
-## 開発者向け情報
+## Developer Information
 
-### ローカル開発コマンド
+### Local Development Commands
 
 ```bash
-npm run dev      # ローカル開発サーバー起動
-npm run check    # TypeScript 型チェック
-npm test         # テスト実行（Vitest）
-npm run deploy   # Cloudflare Workers へデプロイ
+npm run dev      # Start the local development server
+npm run check    # Run TypeScript type checking
+npm test         # Run tests with Vitest
+npm run deploy   # Deploy to Cloudflare Workers
 ```
 
-### アーキテクチャ
+### Architecture
 
 ```
-ブラウザ (HTTP)
-IRC クライアント (WebSocket)  ──→  Cloudflare Worker (index.ts)
-外部スクリプト (REST API)                    │
-                                    Durable Object: IrcProxyDO
-                                            │
-                                    cloudflare:sockets (TCP)
-                                            │
-                                      IRC サーバー
+Browser (HTTP)
+IRC client (WebSocket)  ──→  Cloudflare Worker (index.ts)
+External scripts (REST API)                │
+                                   Durable Object: IrcProxyDO
+                                           │
+                                   cloudflare:sockets (TCP)
+                                           │
+                                      IRC server
 ```
 
-### モジュール構成
+### Module Layout
 
-| ファイル | 役割 |
-|----------|------|
-| `src/index.ts` | Worker エントリポイント・ルーティング・API 認証 |
-| `src/irc-proxy.ts` | Durable Object 本体（状態管理・WebSocket・HTTP ハンドラ） |
-| `src/irc-connection.ts` | IRC サーバーへの TCP ソケット接続（状態マシン: idle → pending → processing → destroyed） |
-| `src/irc-parser.ts` | IRC メッセージのパース・ビルド（IRCv3 タグ対応） |
-| `src/proxy-config.ts` | 型付き環境変数パース |
-| `src/module-system.ts` | plum 互換モジュールシステム（`ss_*` / `cs_*` イベント） |
-| `src/modules/ping.ts` | PING/PONG 自動応答 |
-| `src/modules/channel-track.ts` | JOIN/PART/KICK/QUIT/NICK によるチャンネル状態追跡 |
-| `src/modules/client-sync.ts` | 新規クライアント接続時の状態リプレイ |
-| `src/modules/web.ts` | Web UI モジュールの公開エントリポイント |
-| `src/modules/web-module.ts` | IRC イベントと Web ストア / 描画を結びつける module factory |
-| `src/modules/web-render.ts` | Web UI の HTML / フラグメント描画 |
-| `src/modules/web-store.ts` | Web メッセージバッファと Durable Object ストレージ永続化 |
-| `src/modules/web-theme.ts` | Web UI のテーマ設定・既定値・ X 埋め込みテーマ解決 |
-| `src/modules/web-types.ts` | Web UI モジュールで共有する型定義 |
-| `src/modules/url-metadata.ts` | URL メタデータ / プレビュー機能の公開エントリポイント |
-| `src/modules/url-preview-resolver.ts` | URL 抽出・タイトル取得・埋め込み解決の公開 API |
-| `src/modules/url-preview-providers.ts` | 画像直リンク・YouTube・X/Twitter・一般 HTML の provider 別解決と HTML メタデータ抽出 |
-| `src/modules/url-preview-policy.ts` | URL プレビュー取得前の安全性判定と各種制限値 |
-| `src/modules/url-preview-types.ts` | URL プレビュー解決で共有する型定義 |
+| File | Role |
+|------|------|
+| `src/index.ts` | Worker entry point, routing, and API authentication |
+| `src/irc-proxy.ts` | Durable Object body handling state, WebSocket, and HTTP |
+| `src/irc-connection.ts` | TCP socket connection to the IRC server, with state machine `idle → pending → processing → destroyed` |
+| `src/irc-parser.ts` | IRC message parsing and building, with IRCv3 tag support |
+| `src/proxy-config.ts` | Typed environment variable parsing |
+| `src/module-system.ts` | plum-compatible module system with `ss_*` / `cs_*` events |
+| `src/modules/ping.ts` | Automatic PING/PONG handling |
+| `src/modules/channel-track.ts` | Channel state tracking for JOIN/PART/KICK/QUIT/NICK |
+| `src/modules/client-sync.ts` | State replay when a new client connects |
+| `src/modules/web.ts` | Public entry point for the Web UI module |
+| `src/modules/web-module.ts` | Module factory that connects IRC events to the Web store and renderer |
+| `src/modules/web-render.ts` | HTML and fragment rendering for the Web UI |
+| `src/modules/web-store.ts` | Web message buffer and Durable Object storage persistence |
+| `src/modules/web-theme.ts` | Web UI theme settings, defaults, and X embed theme resolution |
+| `src/modules/web-types.ts` | Shared types used by the Web UI module |
+| `src/modules/url-metadata.ts` | Public entry point for URL metadata and preview features |
+| `src/modules/url-preview-resolver.ts` | Public API for URL extraction, title retrieval, and embed resolution |
+| `src/modules/url-preview-providers.ts` | Provider-specific resolution and HTML metadata extraction for direct images, YouTube, X/Twitter, and general HTML |
+| `src/modules/url-preview-policy.ts` | Safety checks and various limits before retrieving URL previews |
+| `src/modules/url-preview-types.ts` | Shared types used in URL preview resolution |
 
-### IRC 接続状態遷移
+### IRC Connection State Transitions
 
 ```mermaid
 stateDiagram-v2
@@ -574,9 +572,9 @@ stateDiagram-v2
 
     state processing {
         [*] --> running
-        running --> busy : needDrain（書き込みバッファ満杯）
+        running --> busy : needDrain (write buffer full)
         busy --> running : drainComplete
-        running --> running : keepalive（PING/PONG）
+        running --> running : keepalive (PING/PONG)
         running --> closing : close
         closing --> [*] : done
     }
@@ -584,35 +582,34 @@ stateDiagram-v2
     processing --> destroyed : destroy / done
 ```
 
+### How It Appears to Stay Resident
 
-### 常駐しているように見せる仕組み
-
-IRC 接続確立後に Durable Object が `storage.setAlarm()` で次回の keepalive を予約し、`alarm()` ハンドラが起動するたびに再び次回アラームを登録します。
+After establishing an IRC connection, the Durable Object schedules the next keepalive with `storage.setAlarm()`, and every time the `alarm()` handler runs, it schedules the next alarm again.
 
 ```text
-IRC 接続完了
+IRC connection established
   ↓
-KEEPALIVE_INTERVAL 秒後に Alarm を予約
+Schedule an alarm after KEEPALIVE_INTERVAL seconds
   ↓
-alarm() 発火
+alarm() fires
   ↓
-IRC 接続中なら次回 Alarm を再予約
+If still connected, schedule the next alarm again
   ↓
-この繰り返しで DO に定期イベントを入れ続ける
+Repeat to keep periodic events flowing into the DO
 ```
 
-Durable Object が「完全に常駐している」わけではなく、アイドル退避される前に定期的なイベントを入れることで、同じインスタンスと in-memory 状態を維持しやすくしています。切断時には Alarm を停止します。
+The Durable Object is not truly resident forever. Instead, by injecting periodic events before idle eviction, the design makes it easier to keep using the same instance and its in-memory state. When disconnected, alarms are stopped.
 
-Cloudflare のデプロイ、ランタイム更新、配置変更などでは Durable Object が再生成される可能性があるため、永続稼働が保証されるわけではありません。そのため再接続やログ復元を前提に設計しています。
+Cloudflare deployment changes, runtime updates, and placement changes can still recreate the Durable Object, so continuous uptime is not guaranteed. That is why apricot is designed around reconnecting and restoring logs.
 
-`KEEPALIVE_INTERVAL` は短すぎると invocation 数が増え、長すぎると次の Alarm より先に退避されるリスクがあります。運用時は接続安定性とコストのバランスを見ながら調整してください。
+If `KEEPALIVE_INTERVAL` is too short, invocations increase. If it is too long, the instance may be evicted before the next alarm. Tune it in production by balancing connection stability and cost.
 
-## 技術情報の詳細
-[data-flow.md](data-flow.md) に IRC メッセージの流れやモジュール間のデータフローをまとめています。
+## More Technical Details
+[data-flow.md](data-flow.md) summarizes IRC message flow and inter-module data flow.
 
-## 前提技術
+## Prerequisites
 
-- Perl 製 IRC プロキシ「plum」を **Cloudflare Workers + Durable Objects** で実装した TypeScript 版
-- [Node.js](https://nodejs.org/) 18 以上
-- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) v3（`npm install -D wrangler` で導入済み）
-- Cloudflare アカウント（デプロイ時のみ）
+- A TypeScript implementation of the Perl IRC proxy "plum" on **Cloudflare Workers + Durable Objects**
+- [Node.js](https://nodejs.org/) 18 or later
+- [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) v3, already installed through `npm install -D wrangler`
+- A Cloudflare account, required only for deployment
